@@ -1,1 +1,4 @@
 riscv/
+*.o
+*.d
+*.tar.xz
