@@ -25,6 +25,5 @@ git add .
 git commit -m "说明"
 
 # 推送到远程仓库
-git push origin main
-
+git push origin 分支名
 ```
