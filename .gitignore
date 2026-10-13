@@ -2,3 +2,4 @@ riscv/
 *.o
 *.d
 *.tar.xz
+code/
