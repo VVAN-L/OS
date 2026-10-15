@@ -61,7 +61,57 @@ size_t nr_free_pages(void) {
     return pmm_manager->nr_free_pages();
 }
 
-//lab2 function1 YOUR CODE
+//lab2 function1 2411858
+static void page_init(void) {
+    uint64_t memory_base = get_memory_base();
+    uint64_t memory_size = get_memory_size();
+
+    // 内存区间必须有效，并覆盖内核的物理起点。
+    if (memory_size == 0 || memory_base > (uint64_t)-1 - memory_size ||
+        memory_base > KERNEL_BEGIN_PADDR) {
+        panic("Invalid physical memory information");
+    }
+    uint64_t memory_end = memory_base + memory_size;
+    if (memory_end > PHYSICAL_MEMORY_END) {
+        memory_end = PHYSICAL_MEMORY_END;
+    }
+    uintptr_t maxpa = ROUNDDOWN(memory_end, PGSIZE);
+    if (maxpa <= KERNEL_BEGIN_PADDR) {
+        panic("No manageable physical memory");
+    }
+
+    va_pa_offset = PHYSICAL_MEMORY_OFFSET;
+    extern char end[];
+    uintptr_t kernel_end = PADDR(end);
+    if (kernel_end < KERNEL_BEGIN_PADDR || kernel_end >= maxpa) {
+        panic("Kernel exceeds physical memory");
+    }
+
+    // 描述符紧随内核；npage 是页号上界，而非描述符数量。
+    npage = maxpa / PGSIZE;
+    size_t page_count = npage - nbase;
+    uintptr_t pages_pa = ROUNDUP(kernel_end, PGSIZE);
+    if (page_count > (maxpa - pages_pa) / sizeof(struct Page)) {
+        panic("Insufficient memory for page descriptors");
+    }
+    uintptr_t free_begin = ROUNDUP(
+        pages_pa + page_count * sizeof(struct Page), PGSIZE);
+    if (free_begin >= maxpa) {
+        panic("No complete free physical page");
+    }
+
+    pages = (struct Page *)(pages_pa + va_pa_offset);
+    for (size_t i = 0; i < page_count; i++) {
+        pages[i].flags = 0;
+        SetPageReserved(&pages[i]);
+        set_page_ref(&pages[i], 0);
+        pages[i].property = 0;
+        list_init(&pages[i].page_link);
+    }
+
+    // 仅交出内核和描述符之后的完整页面，由管理器建立空闲块。
+    init_memmap(pa2page(free_begin), (maxpa - free_begin) / PGSIZE);
+}
 
 /* pmm_init - initialize the physical memory management */
 void pmm_init(void) {

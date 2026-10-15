@@ -2,3 +2,16 @@ riscv/
 *.o
 *.d
 *.tar.xz
+
+# 忽略编译生成的目录
+bin/
+obj/
+
+# 忽略 QEMU 调试残留
+*.out
+*.in
+
+# 忽略代码扫描和打包文件
+cscope.*
+tags
+*handin.tar.gz
