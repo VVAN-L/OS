@@ -171,7 +171,101 @@ A:需要进行物理内存的探测，以获得可用物理内存范围，这一
 
 ### 功能模块：物理内存分配功能
 
-**负责人：** 2412934-王海沛、2412143-林家熠
+
+
+### 任务一：理解first-fit连续物理内存分配算法
+
+**负责人：** 2412934-王海沛
+任务一：理解 First-Fit 连续物理内存分配器
+
+First-Fit 源码位于 kern/mm/default_pmm.c，维护一条按物理地址升序排列的空闲链表，分配时从头扫描，取第一个容量足够的块。
+
+1、 default_init：初始化
+
+```c
+static void default_init(void) {
+    list_init(&free_list);
+    nr_free = 0;
+}
+```
+
+不涉及真实内存，只把管理结构恢复为"可用页数为 0、链表为空"。list_init 让头节点 prev/next 指向自己形成自环，表示空表；后续遍历以"回到头节点"为终止条件。
+
+2、 default_init_memmap：建立初始空闲块
+
+pmm_init 探测到可用内存后，以 init_memmap(base, n) 逐段交给分配器，做三件事：
+
+1. 清洗页描述符：遍历 [base, base+n)，断言带 PG_reserved，然后 flags、property 清零、ref 置 0。清零 flags 同时摘掉 PG_reserved（归分配器管）并确保 PG_property 为 0（暂非块头）。
+2. 登记块头：只给 base 写 property = n 并 SetPageProperty(base)，块内其余页保持无 property，块大小信息只存一份且存在块首。
+3. 插入链表：nr_free += n 后按地址升序插入。空表则加到头节点后；否则找第一个地址比 base 大的块插其前；走到表尾则追加。
+
+为何保序：First-Fit 分配本身不依赖顺序，但 default_free_pages 的合并依赖链表前后驱找物理相邻块。只有按地址单调，"前驱是左邻、后继是右邻"才成立。保序是为释放时高效合并服务的，这也是任务二改动的关键。
+
+3、 default_alloc_pages：分配连续页
+
+```c
+static struct Page *
+default_alloc_pages(size_t n) {
+    assert(n > 0);
+    if (n > nr_free) return NULL; /* 快速失败 */
+    ...
+    while ((le = list_next(le)) != &free_list) {
+        struct Page *p = le2page(le, page_link);
+        if (p->property >= n) { page = p; break; } /* 首次命中 */
+    }
+    ...
+}
+```
+
+分三步：
+
+1. 总量预判：n > nr_free 时直接返回 NULL，省掉整趟扫描，是廉价有效的剪枝。
+2. 顺序扫描，首次命中：沿 next 走，le2page 把链表节点反解为 struct Page（减去 page_link 偏移）。第一个 property >= n 的块被选中，>= 表示允许切分。
+3. 摘链、切分、记账：
+   先存 page->property（切分后会被改写），再 list_del 摘下块头；
+   若原块更大，剩余部分从 page + n 开始，property = 原大小 - n 并 SetPageProperty，插回链表。插入用切分前记录的 prev = list_prev(&page->page_link)——剩余块地址紧跟原块、又在原后继之前，插在 prev 后正好保序，无需再扫描；
+   nr_free -= n，对 page 执行 ClearPageProperty（它已是已分配页，不再是块头）。
+
+返回 page 即连续物理内存首页描述符。全程不逐页操作，一次分配只动 O(1) 个描述符字段，这是隐式链表的收益。
+
+4、 default_free_pages：回收与相邻合并
+
+只插回不合并会导致碎片化：物理连续空间被切成小块，稍大的连续分配即使总空闲页够也会失败。
+
+1. 合法性检查与状态重置：对 [base, base+n) 每页断言 !PageReserved(p) && !PageProperty(p)。后者能在双重释放时立刻暴露错误。然后清零 flags、重置 ref。
+2. 登记并插回链表：base->property = n; SetPageProperty(base); nr_free += n;，再按地址有序插入（同 init_memmap）。
+3. 先合左边：已按地址插好，list_prev(&base->page_link) 即左邻块。若 p + p->property == base，把 base 页数并入前块、ClearPageProperty(base)、摘掉 base 节点，base 指针前移指向合并后块头 p。
+4. 再合右边：用 list_next(&base->page_link) 取后继，若 base + base->property == p，加上后继页数、ClearPageProperty(p)、摘掉后继节点。
+
+先左后右的原因：左合并改变块头位置和大小。若先右合并，base 已非新块头，list_next(base) 会取错节点。先左合并后 base 更新为真正块头，base + base->property 自动指向新块末尾，右合并判断自然成立。左合并同时解决"块头是谁"和"块尾在哪"。
+
+全程只检查 prev 和 next 各一次——仅在"空闲块互不重叠、也不遗漏"的不变式下成立，而每次释放都做双向合并维持了该不变式。
+
+5、 整体流程
+
+启动：pmm_init 算 npage、分配 pages[]、把内核镜像和页数组标为 reserved，剩余连续区间逐段 init_memmap，每段成为按地址升序挂链的空闲块。
+分配：从表头找第一个够大的块，切分后剩余部分插回原位之后；链表有序使尾部位置 O(1) 可定。
+释放：按地址插回，再与左邻、右邻双向合并，合并后仍是合法的按地址有序节点。
+不变式：链表按首地址严格递增、块互不重叠、块头 property 之和等于 nr_free。
+
+
+6、 改进空间
+
+（一）分配策略：
+
+ Next-Fit：记住上次分配结束位置继续扫描，压力均匀摊到链表，只需加游标；
+Best-Fit：选最小且满足需求的块。链表改按块大小排序后，"第一个 property >= n"天然是最佳块，扫描逻辑不变，即任务二内容。
+
+（二）合并效率：链表邻居改地址索引。 改为 Best-Fit 后链表按大小排序，前后驱不再是物理邻居，合并退化为全表扫描（任务二中即 O(块数)）。通用做法是放弃"链表有序"假设，用独立地址索引或页描述符加"前后空闲块"字段（显式边界标记）；Linux 伙伴系统用 page->private 记块大小、位图标记伙伴空闲，合并直接算伙伴地址查位图，O(1) 完成。
+
+（三）数据结构：页描述符太重。 每页一个 struct Page，4GB 内存即上百万描述符。工业内核用 mem_map 数组 + 延迟初始化，或"每块一个描述符"的显式链表摊薄开销。
+
+
+
+
+### 任务二：实现Best-Fit连续物理内存分配算法
+
+**负责人：** 2412934-王海沛
 
 #### 模块功能描述
 
@@ -208,13 +302,13 @@ void page_init(void);
 
 **功能说明：**
 
-1 模块在系统中的位置
+1、模块在系统中的位置
 物理内存管理器（PMM）是内核内存子系统的第一层。它向下直接管理 DRAM 的 4KB 物理页，向上为后续虚存管理（lab3 的 vmm）提供"分配/释放连续物理页"的原语。
 由于 RISC-V 不存在 x86 那样的 mmap 硬件，内核必须自行维护物理页与 struct Page 描述符的映射：
 物理地址 PA  ──PPN(PA)──►  页号 ppn  ──pages[ppn - nbase]──►  struct Page *
 nbase = DRAM_BASE / PGSIZE = 0x80000000 / 0x1000 = 0x80000，即 DRAM 起始物理页号。减去它是因为 pages[] 数组只覆盖 DRAM 区域，不覆盖低端设备地址空间。
 
-2 核心构件的交互关系
+2、 核心构件的交互关系
 
 ```
                     ┌───────────────────────┐
@@ -237,7 +331,7 @@ nbase = DRAM_BASE / PGSIZE = 0x80000000 / 0x1000 = 0x80000，即 DRAM 起始物�
 
 struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖这 6 个函数指针，更换分配算法时只需改 init_pmm_manager() 中的一行。
 
-3 Best-Fit 与 First-Fit 的本质差别
+3、 Best-Fit 与 First-Fit 的本质差别
 两者代码结构高度相似，唯一本质差别是链表的排序键：
 | | First-Fit | Best-Fit |
 |---|---|---|
@@ -251,7 +345,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 因为链表已按大小有序，"首次命中"就自动等价于"最优命中"，因此分配时无须扫描全表比较候选块大小 —— 这是 Best-Fit 相对"朴素实现（遍历全表取最小满足块）"的性能优势。
 代价转移到了 free 与块切分阶段：任何改变块大小的操作都必须重新定位，free 时的邻块查找也从 O(1) 退化为 O(n)。
 
-4 需要处理的主要场景
+4、 需要处理的主要场景
 1. 首次接管内存：init_memmap 把 page_init 划分出的两段连续物理内存纳入管理，建成两个空闲块。
 2. 精确匹配：请求大小恰等于某空闲块，整块摘除。
 3. 切分：请求小于空闲块，从块头切出 n 页，剩余部分成为新块头并按大小重新插入。
@@ -259,7 +353,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 5. 三方合并：释放区间的左邻、右邻、自身三者可能连成一片，必须合并成一个块；左邻、右邻、左右邻、孤块四种情形都要正确处理。
 6. 链表自身的一致性：best_fit_check 会遍历链表校验 Σ property == nr_free_pages()，任何一处计数或链表维护错误都会被断言捕获。
 
-5 Page 状态约定
+5、 Page 状态约定
 协议与 First-Fit 保持一致（测试函数依赖此协议，不得改动）：
 
 | 状态 | `PG_reserved` | `PG_property` | `property` 含义 |
@@ -451,7 +545,6 @@ best_fit_insert_by_size(base);          /* 3. 最后插入 */
 
 `basic_check()` 与 `best_fit_check()` 是评测基准，其中 `assert(p0 + 4 == p1)` 隐含了"相同大小的块先到者在前"的插入语义。在提示词中把这条隐含语义显式化（"用严格大于号判断"），避免了为通过断言而反复试错。
 
-5. 改进点5：提示词中提醒了 `[Test 2]` 的检测强度
 
 
 
