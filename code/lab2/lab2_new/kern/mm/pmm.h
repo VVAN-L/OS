@@ -80,6 +80,8 @@ extern size_t npage;
 extern const size_t nbase;
 extern uint64_t va_pa_offset;
 
+void page_init(void);
+
 static inline ppn_t page2ppn(struct Page *page) { return page - pages + nbase; }
 
 static inline uintptr_t page2pa(struct Page *page) {
