@@ -192,7 +192,6 @@ const struct pmm_manager best_fit_pmm_manager;
 /* kern/mm/pmm.c:36 */
 static void init_pmm_manager(void);
 /* 修改点：pmm_manager = &default_pmm_manager  ->  &best_fit_pmm_manager */
-
 /* kern/mm/pmm.c:74 */
 void page_init(void);
 /* 修改点：由空骨架补全为完整实现（探测物理内存、建立页描述符数组、划分空闲区）*/
@@ -215,6 +214,8 @@ void page_init(void);
 nbase = DRAM_BASE / PGSIZE = 0x80000000 / 0x1000 = 0x80000，即 DRAM 起始物理页号。减去它是因为 pages[] 数组只覆盖 DRAM 区域，不覆盖低端设备地址空间。
 
 2 核心构件的交互关系
+
+```
                     ┌───────────────────────┐
    内核其他模块 ───► │  alloc_pages / free_pages  （pmm.c 门面，转发到 pmm_manager）│
                     └───────────┬───────────┘
@@ -231,6 +232,8 @@ nbase = DRAM_BASE / PGSIZE = 0x80000000 / 0x1000 = 0x80000，即 DRAM 起始物�
     │   .free_list       │
     │   .nr_free         │
     └────────────────────┘
+```
+
 struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖这 6 个函数指针，更换分配算法时只需改 init_pmm_manager() 中的一行。
 
 3 Best-Fit 与 First-Fit 的本质差别
@@ -243,6 +246,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 | 剩余块插入位置 | 地址顺序固定，可直接 `list_add_before(base+... )` | 大小变了，必须重新定位 |
 | 释放时找左右邻块 | 链表前后驱即物理邻居 | 前后驱不再是物理邻居，必须比较地址区间 |
 | 分配效率 | O(链表长度) 最坏 | O(链表长度)，但一旦命中即最优，无需比较 |
+
 关键洞察：因为链表已按大小有序，"首次命中"就自动等价于"最优命中"，因此分配时无须扫描全表比较候选块大小 —— 这是 Best-Fit 相对"朴素实现（遍历全表取最小满足块）"的性能优势。
 代价转移到了 free 与块切分阶段：任何改变块大小的操作都必须重新定位，free 时的邻块查找也从 O(1) 退化为 O(n)。
 
@@ -263,6 +267,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 | 空闲块块头 | 0 |*1 | 本块总页数 |
 | 空闲块内非块头 | 0 | 0 | 无意义 |
 | 已分配给调用者 | 0 | 0 | 无意义 |
+  
   注意 p->flags = 0 会同时清掉 PG_reserved 与 PG_property 两个标志位，实现中利用了这一性质。
 
 #### 最终提示词
