@@ -205,6 +205,7 @@ void page_init(void);
   
 ```
 说明：这四行 extern 声明是本模块能编译通过的前提。pmm.h 中的 page2ppn() / pa2page() 是 static inline 函数，内部直接引用 pages、nbase、npage，若这些外部符号在 pmm.h 中不可见，init.c、best_fit_pmm.c 等翻译单元会因符号未声明而编译失败。
+
 **功能说明：**
 
 1 模块在系统中的位置
@@ -247,7 +248,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 | 释放时找左右邻块 | 链表前后驱即物理邻居 | 前后驱不再是物理邻居，必须比较地址区间 |
 | 分配效率 | O(链表长度) 最坏 | O(链表长度)，但一旦命中即最优，无需比较 |
 
-关键洞察：因为链表已按大小有序，"首次命中"就自动等价于"最优命中"，因此分配时无须扫描全表比较候选块大小 —— 这是 Best-Fit 相对"朴素实现（遍历全表取最小满足块）"的性能优势。
+因为链表已按大小有序，"首次命中"就自动等价于"最优命中"，因此分配时无须扫描全表比较候选块大小 —— 这是 Best-Fit 相对"朴素实现（遍历全表取最小满足块）"的性能优势。
 代价转移到了 free 与块切分阶段：任何改变块大小的操作都必须重新定位，free 时的邻块查找也从 O(1) 退化为 O(n)。
 
 4 需要处理的主要场景
@@ -333,12 +334,14 @@ SV39 分页与物理内存管理。请用 C99 实现 Best-Fit 物理内存分配
 - 问题1：
   free_list 仍按地址排序，Best-Fit 退化为 First-Fit
 最初直接在 default_pmm.c 基础上改函数名，链表插入逻辑没有改动：
- 错误写法：按地址升序插入（First-Fit 的逻辑） 
+```c
+/* 错误写法：按地址升序插入（First-Fit 的逻辑） */
 static void
 best_fit_init_memmap(struct Page *base, size_t n) {
     ...
     list_add_before(&free_list, &(base->page_link));   // 总加在表头
 }
+```
 
 现象：best_fit_check() 中的断言 assert(p0 + 4 == p1) 失败。
 
@@ -351,12 +354,14 @@ best_fit_init_memmap(struct Page *base, size_t n) {
 - 问题2：
   三方合并时右邻判断失效，导致块重叠
 第一版的 free_pages 是这样写的：
- 错误写法 
+```c
+/* 错误写法 */
 while ((le = list_next(le)) != &free_list) {
     struct Page *q = le2page(le, page_link);
     if (q + q->property == base)      left  = q;
     if (base + base->property == q)   right = q;    // ← 错误
 }
+```
 
 现象：best_fit_check() 在 free_pages(p0, 5) 之后 assert((p0 = alloc_pages(5)) != NULL) 失败；随后 nr_free 计数与实际不符，触发 assert(total == 0)。
 
@@ -378,12 +383,14 @@ while ((le = list_next(le)) != &free_list) {
 `list_del` 与 `property` 修改顺序颠倒，链表有序性被破坏
 
 
- 错误写法：先改 property，再删链 
+```c
+/* 错误写法：先改 property，再删链 */
 if (left != NULL) {
     left->property += base->property;
     list_del(&(left->page_link));
     base = left;
 }
+```
 
 
 现象：偶发地在后续 `alloc_pages` 中取到"不是最小满足块"的块；`best_fit_check` 的 `assert(total == nr_free_pages())` 间歇性失败。
@@ -394,7 +401,8 @@ if (left != NULL) {
 严格执行"先摘链，后合并，最后统一按新大小插入"三步：
 
 
- 正确写法 
+ ```c
+/* 正确写法 */
 if (left != NULL) {
     list_del(&(left->page_link));       /* 1. 先摘 */
     ClearPageProperty(base);
@@ -407,10 +415,14 @@ if (right != NULL) {
     ClearPageProperty(right);
 }
 best_fit_insert_by_size(base);          /* 3. 最后插入 */
+```
 
 
 提示词中相应加入约束："free 必须先 `list_del` 两个邻块再合并，禁止先改 `property` 后删链"。
 
+##### 第三次迭代
+
+修正上述三处后，编译与运行均一次通过，不再需要修改。
 
 **最终结果：**
 
