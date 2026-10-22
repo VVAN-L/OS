@@ -773,7 +773,7 @@ qemu-system-riscv64 -machine virt -nographic -bios default -kernel bin/ucore.img
 
 **测试截图：**
 
-
+![SLUB测试成功截图](./images/SLUB测试.png)
 
 ---
 
