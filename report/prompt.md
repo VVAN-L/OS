@@ -63,7 +63,7 @@ get_memory_base()、get_memory_size()、panic()、cprintf()、init_memmap()、pa
 
 ## 2412934 王海沛
 
-
+```markdown
 [PROMPT]
 在 RISC-V 64 的 ucore 教学内核中实现 Best-Fit 连续物理内存管理器，使 make grade 的两项测试通过。
 
@@ -159,3 +159,4 @@ free_area_t（pmm.h）：文件内已定义 best_fit_free_area 及宏 free_list�
     释放 p0+1 起 2 页、p0+4 起 1 页后，alloc_pages(1) 必须返回 p0+4 而非 p0+1。
      这是 Best-Fit 的语义核心：按地址排序的实现在此必败。
     free_pages(p0, 5) 后 alloc_pages(5) 须成功，验证三方合并。
+```
