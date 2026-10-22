@@ -30,11 +30,11 @@
 
 ## 二、实验环境
 
-| 成员           | AI 编程工具          | 底层模型    | 备注 |
-| -------------- | -------------------- | ----------- | ---- |
-| 2411858-王钟岳 | Codex（VS Code插件） | GPT-6 Astra |      |
-| 2412934-王海沛 | deepseek             | deepseek-V4.1-Flash   |      |
-| 2412143-林家熠 | deepseek             | deepseek    |      |
+| 成员           | AI 编程工具          | 底层模型            | 备注 |
+| -------------- | -------------------- | ------------------- | ---- |
+| 2411858-王钟岳 | Codex（VS Code插件） | GPT-6 Astra         |      |
+| 2412934-王海沛 | deepseek             | deepseek-V4.1-Flash |      |
+| 2412143-林家熠 | deepseek             | deepseek            |      |
 
 **说明：**
 
@@ -171,12 +171,9 @@ A:需要进行物理内存的探测，以获得可用物理内存范围，这一
 
 ### 功能模块：物理内存分配功能
 
-
-
 ### 任务一：理解first-fit连续物理内存分配算法
 
 **负责人：** 2412934-王海沛
-
 
 First-Fit 源码位于 kern/mm/default_pmm.c，维护一条按物理地址升序排列的空闲链表，分配时从头扫描，取第一个容量足够的块。
 
@@ -248,20 +245,16 @@ default_alloc_pages(size_t n) {
 释放：按地址插回，再与左邻、右邻双向合并，合并后仍是合法的按地址有序节点。
 不变式：链表按首地址严格递增、块互不重叠、块头 property 之和等于 nr_free。
 
-
 6、 改进空间
 
 （一）分配策略：
 
- Next-Fit：记住上次分配结束位置继续扫描，压力均匀摊到链表，只需加游标；
+Next-Fit：记住上次分配结束位置继续扫描，压力均匀摊到链表，只需加游标；
 Best-Fit：选最小且满足需求的块。链表改按块大小排序后，"第一个 property >= n"天然是最佳块，扫描逻辑不变，即任务二内容。
 
 （二）合并效率：链表邻居改地址索引。 改为 Best-Fit 后链表按大小排序，前后驱不再是物理邻居，合并退化为全表扫描（任务二中即 O(块数)）。通用做法是放弃"链表有序"假设，用独立地址索引或页描述符加"前后空闲块"字段（显式边界标记）；Linux 伙伴系统用 page->private 记块大小、位图标记伙伴空闲，合并直接算伙伴地址查位图，O(1) 完成。
 
 （三）数据结构：页描述符太重。 每页一个 struct Page，4GB 内存即上百万描述符。工业内核用 mem_map 数组 + 延迟初始化，或"每块一个描述符"的显式链表摊薄开销。
-
-
-
 
 ### 任务二：实现Best-Fit连续物理内存分配算法
 
@@ -296,8 +289,9 @@ extern size_t npage;
 extern const size_t nbase;
 extern uint64_t va_pa_offset;
 void page_init(void);
-  
+
 ```
+
 说明：这四行 extern 声明是本模块能编译通过的前提。pmm.h 中的 page2ppn() / pa2page() 是 static inline 函数，内部直接引用 pages、nbase、npage，若这些外部符号在 pmm.h 中不可见，init.c、best_fit_pmm.c 等翻译单元会因符号未声明而编译失败。
 
 **功能说明：**
@@ -305,7 +299,7 @@ void page_init(void);
 1、模块在系统中的位置
 物理内存管理器（PMM）是内核内存子系统的第一层。它向下直接管理 DRAM 的 4KB 物理页，向上为后续虚存管理（lab3 的 vmm）提供"分配/释放连续物理页"的原语。
 由于 RISC-V 不存在 x86 那样的 mmap 硬件，内核必须自行维护物理页与 struct Page 描述符的映射：
-物理地址 PA  ──PPN(PA)──►  页号 ppn  ──pages[ppn - nbase]──►  struct Page *
+物理地址 PA ──PPN(PA)──► 页号 ppn ──pages[ppn - nbase]──► struct Page \*
 nbase = DRAM_BASE / PGSIZE = 0x80000000 / 0x1000 = 0x80000，即 DRAM 起始物理页号。减去它是因为 pages[] 数组只覆盖 DRAM 区域，不覆盖低端设备地址空间。
 
 2、 核心构件的交互关系
@@ -346,6 +340,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 代价转移到了 free 与块切分阶段：任何改变块大小的操作都必须重新定位，free 时的邻块查找也从 O(1) 退化为 O(n)。
 
 4、 需要处理的主要场景
+
 1. 首次接管内存：init_memmap 把 page_init 划分出的两段连续物理内存纳入管理，建成两个空闲块。
 2. 精确匹配：请求大小恰等于某空闲块，整块摘除。
 3. 切分：请求小于空闲块，从块头切出 n 页，剩余部分成为新块头并按大小重新插入。
@@ -356,14 +351,14 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 5、 Page 状态约定
 协议与 First-Fit 保持一致（测试函数依赖此协议，不得改动）：
 
-| 状态 | `PG_reserved` | `PG_property` | `property` 含义 |
-|---|---|---|---|
-| 内核/页数组占用 | 1 | 0 | 无意义 |
-| 空闲块块头 | 0 |*1 | 本块总页数 |
-| 空闲块内非块头 | 0 | 0 | 无意义 |
-| 已分配给调用者 | 0 | 0 | 无意义 |
-  
-  注意 p->flags = 0 会同时清掉 PG_reserved 与 PG_property 两个标志位，实现中利用了这一性质。
+| 状态            | `PG_reserved` | `PG_property` | `property` 含义 |
+| --------------- | ------------- | ------------- | --------------- |
+| 内核/页数组占用 | 1             | 0             | 无意义          |
+| 空闲块块头      | 0             | \*1           | 本块总页数      |
+| 空闲块内非块头  | 0             | 0             | 无意义          |
+| 已分配给调用者  | 0             | 0             | 无意义          |
+
+注意 p->flags = 0 会同时清掉 PG_reserved 与 PG_property 两个标志位，实现中利用了这一性质。
 
 #### 最终提示词
 
@@ -375,6 +370,7 @@ struct pmm_manager 是策略模式的具体体现：内核其余部分只依赖�
 SV39 分页与物理内存管理。请用 C99 实现 Best-Fit 物理内存分配器。
 
 [CONTEXT]
+
 - 工程：ucore lab2（RISC-V 64，QEMU virt 机器，OpenSBI 引导）
 - 需要补全：kern/mm/best_fit_pmm.c（文件内已有一份骨架和空实现）
 - 参考实现：kern/mm/default_pmm.c 是 First-Fit，只要理解它即可，不要照抄排序逻辑
@@ -386,23 +382,26 @@ SV39 分页与物理内存管理。请用 C99 实现 Best-Fit 物理内存分配
 
 [SPECIFICATION]
 必须实现并注册 best_fit_pmm_manager，包含以下六个成员：
-  1. init()            —— 重置 free_area（空链表 + nr_free=0），不碰具体内存
-  2. init_memmap(base, n) —— 把 [base, base+n) 建成一个空闲块
-  3. alloc_pages(n)    —— 分配连续 n 页，返回块头 Page*；失败返回 NULL
-  4. free_pages(base, n) —— 回收 [base, base+n)，插回链表并合并物理邻块
-  5. nr_free_pages()   —— 返回当前空闲页总数
-  6. check()           —— 保留框架自带的 basic_check / best_fit_check，不得修改
+
+1. init() —— 重置 free_area（空链表 + nr_free=0），不碰具体内存
+2. init_memmap(base, n) —— 把 [base, base+n) 建成一个空闲块
+3. alloc_pages(n) —— 分配连续 n 页，返回块头 Page\*；失败返回 NULL
+4. free_pages(base, n) —— 回收 [base, base+n)，插回链表并合并物理邻块
+5. nr_free_pages() —— 返回当前空闲页总数
+6. check() —— 保留框架自带的 basic_check / best_fit_check，不得修改
 
 【核心算法要求】
+
 - 维护 free_list 按块大小（property）严格升序；
 - alloc 时"第一个 property >= n 的块"即为最优块，无需全表比较大小；
 - 切分剩余块后，剩余块必须按新的大小重新定位插入，不能简单追加；
 - free 时因链表按大小排序，前后驱不再是物理邻居，必须遍历链表用地址区间判断：
-    q + q->property == base  -> q 是左邻
-    base + n == q            -> q 是右邻
+  q + q->property == base -> q 是左邻
+  base + n == q -> q 是右邻
 - free 必须先 list_del 两个邻块再合并，禁止"先改 property 后删链"。
 
 [CONSTRAINTS]
+
 - 不得修改 basic_check() 与 best_fit_check() 的任何一行；
 - 不得修改 struct pmm_manager 的成员顺序与签名；
 - 所有异常输入用 assert 捕获，符合 ucore 既有风格；
@@ -427,7 +426,8 @@ SV39 分页与物理内存管理。请用 C99 实现 Best-Fit 物理内存分配
 
 - 问题1：
   free_list 仍按地址排序，Best-Fit 退化为 First-Fit
-最初直接在 default_pmm.c 基础上改函数名，链表插入逻辑没有改动：
+  最初直接在 default_pmm.c 基础上改函数名，链表插入逻辑没有改动：
+
 ```c
 /* 错误写法：按地址升序插入（First-Fit 的逻辑） */
 static void
@@ -440,14 +440,12 @@ best_fit_init_memmap(struct Page *base, size_t n) {
 现象：best_fit_check() 中的断言 assert(p0 + 4 == p1) 失败。
 
 原因分析：该断言要求 alloc_pages(1) 返回恰好是 p0+4 的那个块。这只有在"链表按大小有序、且相同大小时保持先到者在前"的语义下才成立。若按地址插入，取到的会是地址最小的块，与预期不符。
-  说明：[Test 2] Best-Fit 本身只校验 pmm_manager 指针是否指向 best_fit_pmm_manager（见 tools/test_lab2.c:106），因此即使算法错误该测试仍会 PASS。真正的正确性由 best_fit_check() 内部的 6 个计分点保证。这一点在调试时一度造成误判，以为改个名字就完成了。
-
-
-
+说明：[Test 2] Best-Fit 本身只校验 pmm_manager 指针是否指向 best_fit_pmm_manager（见 tools/test_lab2.c:106），因此即使算法错误该测试仍会 PASS。真正的正确性由 best_fit_check() 内部的 6 个计分点保证。这一点在调试时一度造成误判，以为改个名字就完成了。
 
 - 问题2：
   三方合并时右邻判断失效，导致块重叠
-第一版的 free_pages 是这样写的：
+  第一版的 free_pages 是这样写的：
+
 ```c
 /* 错误写法 */
 while ((le = list_next(le)) != &free_list) {
@@ -466,16 +464,14 @@ while ((le = list_next(le)) != &free_list) {
 - 针对问题1：在提示词中加入 【核心算法要求】，明确写出"维护 free_list 按块大小（property）严格升序"，并补充"相同大小保持先到者在前（用严格大于号 < 而非 <= 判断）"，避免相同大小的块被插到已有块之前而破坏上述断言。
 
 - 针对问题2：把右邻判断改为使用本次释放区间的末尾，即 `base + n`（`n` 是入参，合并前后都不变）：
-并在提示词 【核心算法要求】 中增加一条明确禁令：
-"free 时必须用本次释放区间的末尾 `base + n` 判断右邻，不能套用 `base->property`（后面合并会改写它）。"
-同时补充"空闲块互不重叠，故左右邻最多各一个"，说明该循环不需要提前 `break`。
-
+  并在提示词 【核心算法要求】 中增加一条明确禁令：
+  "free 时必须用本次释放区间的末尾 `base + n` 判断右邻，不能套用 `base->property`（后面合并会改写它）。"
+  同时补充"空闲块互不重叠，故左右邻最多各一个"，说明该循环不需要提前 `break`。
 
 ##### 第二次迭代
 
 **遇到的问题：**
 `list_del` 与 `property` 修改顺序颠倒，链表有序性被破坏
-
 
 ```c
 /* 错误写法：先改 property，再删链 */
@@ -486,7 +482,6 @@ if (left != NULL) {
 }
 ```
 
-
 现象：偶发地在后续 `alloc_pages` 中取到"不是最小满足块"的块；`best_fit_check` 的 `assert(total == nr_free_pages())` 间歇性失败。
 
 原因分析：`left` 此刻仍在链表上，其 `property` 被就地放大。链表的排序键被一个"尚未重新定位"的节点破坏，导致后续遍历在错误的位置提前 `break`。虽然最终会重新插入，但中间这个"有序性已破、尚未修复"的窗口里，任何依赖有序性的操作都会出错。
@@ -494,23 +489,21 @@ if (left != NULL) {
 **问题解决策略：**
 严格执行"先摘链，后合并，最后统一按新大小插入"三步：
 
-
- ```c
+```c
 /* 正确写法 */
 if (left != NULL) {
-    list_del(&(left->page_link));       /* 1. 先摘 */
-    ClearPageProperty(base);
-    left->property += base->property;   /* 2. 再合并 */
-    base = left;
+   list_del(&(left->page_link));       /* 1. 先摘 */
+   ClearPageProperty(base);
+   left->property += base->property;   /* 2. 再合并 */
+   base = left;
 }
 if (right != NULL) {
-    list_del(&(right->page_link));
-    base->property += right->property;
-    ClearPageProperty(right);
+   list_del(&(right->page_link));
+   base->property += right->property;
+   ClearPageProperty(right);
 }
 best_fit_insert_by_size(base);          /* 3. 最后插入 */
 ```
-
 
 提示词中相应加入约束："free 必须先 `list_del` 两个邻块再合并，禁止先改 `property` 后删链"。
 
@@ -528,7 +521,6 @@ best_fit_insert_by_size(base);          /* 3. 最后插入 */
 
 **关键改进点总结（如有）：**
 
-
 1. 改进点1：在 `[SPECIFICATION]` 中补充了完整的 `pmm_manager` 成员契约
 
 最初只说"实现 Best-Fit"，模型对 `init()` 与 `init_memmap()` 的职责边界理解错误（把内存初始化写进 `init()`）。补充后明确：`init()` 只重置 `free_area` 数据结构，不碰任何具体内存；具体内存的接管全部由 `init_memmap()` 完成。这对应 `pmm_init()` 中"先 `pmm_manager->init()`，再 `page_init()` 调 `init_memmap`"的两阶段设计。
@@ -545,11 +537,6 @@ best_fit_insert_by_size(base);          /* 3. 最后插入 */
 
 `basic_check()` 与 `best_fit_check()` 是评测基准，其中 `assert(p0 + 4 == p1)` 隐含了"相同大小的块先到者在前"的插入语义。在提示词中把这条隐含语义显式化（"用严格大于号判断"），避免了为通过断言而反复试错。
 
-
-
-
-
-
 ### 练习：任务三：buddy system（伙伴系统）分配算法
 
 **负责人：** 2412143-林家熠
@@ -557,10 +544,12 @@ best_fit_insert_by_size(base);          /* 3. 最后插入 */
 #### 1. 最终提示词
 
 **第一份 Prompt（用于生成 Buddy System 模块并接入内核）：**
+
 ```markdown
 你是一个操作系统内核开发者。请参考 ucore 的 kern/mm/pmm.h 中的 struct pmm_manager 框架，在 kern/mm/buddy_pmm.c 中实现完整的 Buddy System 物理内存分配模块。
 
 要求：
+
 1. 定义 #define MAX_ORDER 11（最大支持 2^11 个连续页）。
 2. 使用 struct Page 的 property 字段记录块的阶数（order），头页的 property 有效。
 3. 实现 free_area[MAX_ORDER + 1] 双向链表数组，每个节点挂在对应阶数的空闲块。
@@ -580,6 +569,7 @@ best_fit_insert_by_size(base);          /* 3. 最后插入 */
 请为刚才生成的 Buddy System 分配器编写测试函数 buddy_check()，放在 kern/mm/buddy_pmm.c 中。
 
 测试要求覆盖以下核心行为与边界情况：
+
 1. 基本分配与释放：申请 1 页、2 页、3 页（验证向上取整到 4 页）、8 页，检查返回的页是否合法且不重叠。
 2. 伙伴合并：依次释放相邻的伙伴块（如先释放 A，再释放其伙伴 B），验证它们是否被正确合并为更大的块。
 3. 边界情况：尝试申请超过 MAX_ORDER 大小的页（如 1 << (MAX_ORDER + 1)），应返回 NULL；释放时传入非对齐的页数应触发 assert 失败。
@@ -591,6 +581,7 @@ best_fit_insert_by_size(base);          /* 3. 最后插入 */
 #### 2. 测试覆盖说明与有效性检验
 
 **测试覆盖的核心行为和边界情况：**
+
 - 基本分配与对齐逻辑：通过申请 1、2、3、8 页的内存，验证了 Buddy System 能够正确地将非 2 的幂次大小的请求向上取整到最近的 2 的幂次（例如申请 3 页实际会分配 4 页，验证了向上取整逻辑）。
 - 伙伴合并（核心难点）：通过依次释放相邻的伙伴块，测试了算法能否通过物理页号（PPN）的异或操作正确找到伙伴块，并在满足条件时将它们逐层合并成更大的块。
 - 边界与鲁棒性：测试了超过 `MAX_ORDER` 的极大内存请求，确保分配器在资源不足或请求非法时能安全地返回 `NULL`，而不是引发系统崩溃；同时验证了释放非对齐页数时会触发断言，保护了内存管理器的内部状态。
@@ -607,17 +598,19 @@ Buddy 算法最核心的两个机制就是分裂（Split）和合并（Merge）�
 **负责人：** 2412143-林家熠
 
 #### 1. 最终提示词
+
 **第一份 Prompt（用于生成 SLUB 模块并接入内核）：**
 
 ```markdown
 请帮我实现一个简化的 SLUB 内存分配器。新建 kern/mm/slub.c 和 slub.h。
 要求：
+
 1. 底层依赖于现有的页分配器（如 buddy_alloc_pages 或 default_alloc_pages）。
 2. 支持分配指定大小的对象（32, 64, 128, 256, 512 字节），向上对齐到 2 的幂次。
 3. 内部维护一个 kmem_cache 数组，每种大小对应一个 cache。
 4. 当 cache 的空闲链表为空时，调用页分配器申请一页，并将其切分为对应大小的对象挂入空闲链表。
 5. 为了在 kfree 时能知道对象大小，请在每个内存块前面添加一个 Header 元数据，记录该块所属的 cache。
-6. 提供 kmalloc(size_t size) 和 kfree(void *ptr) 接口。
+6. 提供 kmalloc(size_t size) 和 kfree(void \*ptr) 接口。
 7. 在 kern/mm/pmm.c 的 pmm_init 末尾调用 slub_init()。
 ```
 
@@ -626,6 +619,7 @@ Buddy 算法最核心的两个机制就是分裂（Split）和合并（Merge）�
 ```markdown
 请为刚才的 SLUB 分配器编写一个测试函数 slub_check()，放在 slub.c 中，并在 pmm_init 中调用。
 测试要求：
+
 1. 基础分配测试：测试分配不同大小（如 32B, 50B, 200B）的对象，并验证返回的指针不为空，且能通过 Header 验证其进入了正确的 Cache 大小。
 2. 批量分配测试：连续分配 100 个 128B 的对象，验证是否触发了底层向页分配器申请新页（Refill）。
 3. 释放与复用测试：释放刚才分配的所有对象，检查对应 Cache 的空闲对象数是否正确增加。
@@ -636,6 +630,7 @@ Buddy 算法最核心的两个机制就是分裂（Split）和合并（Merge）�
 #### 2. 测试覆盖说明与有效性检验
 
 **测试覆盖的核心行为和边界情况：**
+
 - 多尺寸分配与元数据（Header）有效性：测试分配 32B、50B（向上对齐到 64B）、200B（向上对齐到 256B）的对象，不仅验证了不同大小对象的按需分配，还通过检查 Header 中的 `cache` 指针和 `size` 字段，验证了元数据是否被正确写入和读取。
 - 按需扩容（Refill）机制：通过一次性申请 100 个 128B 对象，由于一页最多只能切分 32 个 128B 对象（4KB/128B），该测试必然会触发底层页分配器多次分配新页并切分，有效检验了空闲链表耗尽时的自动化扩容能力。
 - 释放复用与内存回收：通过 `kfree` 将分配的对象释放后，检查对应 Cache 的 `free_objs` 计数器是否精确增加。这验证了 SLUB 能够正确将内存块挂回空闲链表，为后续复用做好准备。
@@ -654,9 +649,23 @@ SLUB 的核心设计是“基于页的两级架构”和“对象复用”。批
 - 测试通过的结果（make grade），只有一个
 -->
 
+在 code/kern/mm/pmm.c 的 init_pmm_manager() 中，将：
+pmm_manager = &default_pmm_manager;
+改成：
+pmm_manager = &best_fit_pmm_manager;
+
+随后在 code 文件夹下运行
+
+```bash
+make qemu
+make grade
+```
+
 **测试截图：**
 
-![测试结果截图](./images/test_result.png)
+![测试结果截图1](./images/功能测试_make_qemu.png)
+
+![测试结果截图1](./images/功能测试_make_grade.png)
 
 ---
 
