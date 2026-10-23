@@ -160,3 +160,115 @@ free_area_t（pmm.h）：文件内已定义 best_fit_free_area 及宏 free_list�
      这是 Best-Fit 的语义核心：按地址排序的实现在此必败。
     free_pages(p0, 5) 后 alloc_pages(5) 须成功，验证三方合并。
 ```
+
+## 2412143 林家熠
+
+**第一份 Prompt（用于生成 Buddy System 模块并接入内核）：**
+
+```markdown
+[PROMPT]
+修改文件 kern/mm/buddy_pmm.c 和 kern/mm/pmm.c，从零实现完整的 Buddy System 物理内存分配模块并完成接入。
+
+[RELY]
+// 宏定义与数据结构
+struct Page 的 property 字段、libs/list.h 中的双向链表宏、PPN 宏定义。
+// 已有框架
+kern/mm/pmm.h 中的 struct pmm_manager 框架。
+
+[GUARANTEE]
+必须实现或修改的接口：
+- buddy_init
+- buddy_init_memmap
+- buddy_alloc_pages
+- buddy_free_pages
+- buddy_nr_free_pages
+- 定义 struct pmm_manager buddy_pmm_manager
+修改 kern/mm/pmm.c 的 init_pmm_manager 函数，将 pmm_manager 指向 buddy_pmm_manager。
+
+[SPECIFICATION]
+Pre-Condition: 系统已经通过 page_init 探测到物理内存范围。
+Post-Condition:
+- 定义 #define MAX_ORDER 11（最大支持 2^11 个连续页）。
+- 使用 struct Page 的 property 字段记录块的阶数（order），头页的 property 有效。
+- 实现 free_area[MAX_ORDER + 1] 双向链表数组，每个节点挂在对应阶数的空闲块。
+- buddy_init：初始化 free_area 链表。
+- buddy_init_memmap：将 [base, base + n) 的空闲页按 2 的幂次拆分，挂入 free_area。
+- buddy_alloc_pages：申请 n 页时向上取整到 2 的 order 次幂，从 free_area[order] 查找，找不到则分裂更大块。
+- buddy_free_pages：释放块并检查伙伴块（通过 PPN 异或计算伙伴页号），如果伙伴空闲则合并。
+- buddy_nr_free_pages：返回所有阶数空闲页总数。
+```
+
+**第二份 Prompt（用于生成测试函数）：**
+
+```markdown
+[PROMPT]
+修改文件 kern/mm/buddy_pmm.c，编写测试函数 buddy_check()。
+
+[RELY]
+刚才生成的 Buddy System 分配器、assert 宏、cprintf 函数。
+
+[GUARANTEE]
+必须实现或修改的接口：
+- buddy_check() 测试函数。
+
+[SPECIFICATION]
+测试行为要求覆盖以下核心行为与边界情况：
+1. 基本分配与释放：申请 1 页、2 页、3 页（验证向上取整到 4 页）、8 页，检查返回的页是否合法且不重叠。
+2. 伙伴合并：依次释放相邻的伙伴块（如先释放 A，再释放其伙伴 B），验证它们是否被正确合并为更大的块。
+3. 边界情况：尝试申请超过 MAX_ORDER 大小的页（如 1 << (MAX_ORDER + 1)），应返回 NULL；释放时传入非对齐的页数应触发 assert 失败。
+4. 完整性检查：在测试前后检查 buddy_nr_free_pages() 的总数是否一致。
+请输出完整的测试代码，使用 assert 和 cprintf 进行验证和输出。
+```
+
+**SLUB模块（challenge）：**
+
+**第一份 Prompt（用于生成 SLUB 模块并接入内核）：**
+
+```markdown
+[PROMPT]
+新建文件 kern/mm/slub.c 和 kern/mm/slub.h，从零实现一个简化的 SLUB 内存分配器，并在 kern/mm/pmm.c 的 pmm_init 末尾接入。
+
+[RELY]
+// 宏定义与数据结构
+struct Page、page2pa、va_pa_offset。
+// 已有函数
+现有的页分配器（如 default_pmm_manager 的 alloc_pages）。
+
+[GUARANTEE]
+必须实现或修改的接口：
+- slub_init
+- kmalloc(size_t size)
+- kfree(void *ptr)
+- 内部结构体：kmem_cache 数组。
+修改 kern/mm/pmm.c 的 pmm_init 末尾调用 slub_init()。
+
+[SPECIFICATION]
+Pre-Condition: 物理内存页分配器已初始化完毕。
+Post-Condition:
+- 支持分配指定大小的对象（32, 64, 128, 256, 512 字节），向上对齐到 2 的幂次。
+- 内部维护一个 kmem_cache 数组，每种大小对应一个 cache。
+- 当 cache 的空闲链表为空时，调用页分配器申请一页，并将其切分为对应大小的对象挂入空闲链表。
+- 为了在 kfree 时能知道对象大小，请在每个内存块前面添加一个 Header 元数据，记录该块所属的 cache。
+```
+
+**第二份 Prompt（用于生成测试函数）：**
+
+```markdown
+[PROMPT]
+修改文件 kern/mm/slub.c，编写测试函数 slub_check()，并在 kern/mm/pmm.c 的 pmm_init 中调用。
+
+[RELY]
+刚才生成的 SLUB 分配器、assert 宏、cprintf 函数。
+
+[GUARANTEE]
+必须实现或修改的接口：
+- slub_check() 测试函数。
+
+[SPECIFICATION]
+测试行为要求覆盖以下核心行为与边界情况：
+1. 基础分配测试：测试分配不同大小（如 32B, 50B, 200B）的对象，并验证返回的指针不为空，且能通过 Header 验证其进入了正确的 Cache 大小。
+2. 批量分配测试：连续分配 100 个 128B 的对象，验证是否触发了底层向页分配器申请新页（Refill）。
+3. 释放与复用测试：释放刚才分配的所有对象，检查对应 Cache 的空闲对象数是否正确增加。
+4. 边界测试：分配大于最大支持范围（如 1024B）和大小为 0 的对象，应返回 NULL。
+请使用 assert 和 cprintf 输出测试结果。
+```
