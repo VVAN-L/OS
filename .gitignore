@@ -2,3 +2,5 @@ riscv/
 *.o
 *.d
 *.tar.xz
+code/bin
+code/obj
