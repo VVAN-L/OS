@@ -319,29 +319,62 @@ exception_handler 由其他成员实现；如需声明可以添加，但不能�
 
 ```c
 // 列出本模块涉及的所有函数签名
-void example_function(void);
-int another_function(int arg);
+void exception_handler(struct trapframe *tf);
 ```
 
 **功能说明：**
 
-[简要描述该模块的功能，包括：
+*   **该模块在整个系统中的作用**：
+    `exception_handler` 是 Trap 处理框架中专门负责**同步异常**（Synchronous Exception）的核心枢纽。它的作用是当 CPU 执行指令发生错误（如非法指令、断点）时，接管控制权并记录现场，防止内核直接崩溃。它是保障内核健壮性的重要防线。
 
-- 该模块在整个系统中的作用
-- 需要处理的主要场景
-- 与其他模块的交互关系]
+*   **需要处理的主要场景**：
+    1.  **非法指令异常（`CAUSE_ILLEGAL_INSTRUCTION`）**：当前执行流遇到无法识别的指令。需输出异常信息，并动态计算指令长度以更新 `epc`。
+    2.  **断点异常（`CAUSE_BREAKPOINT`）**：程序执行了 `ebreak` 指令。常用于内核调试。同样需输出信息并更新 `epc` 越过断点。
+    3.  **其他未知异常（Default）**：对于框架未要求具体处理的其他异常，调用 `print_trapframe(tf)` 打印完整的寄存器现场进行兜底排查。
+
+*   **与其他模块的交互关系**：
+    1.  **上游入口**：接收由 `trap_dispatch()` 函数根据 `tf->cause` 的正负号（最高位）分发而来的调用。
+    2.  **数据依赖**：直接操作 `struct trapframe *tf` 结构体，读取 `cause` 判断类型，读取并修改 `epc`。
+    3.  **输出接口**：依赖 `cprintf()` 打印日志，依赖 `print_trapframe()` 打印底层寄存器状态。
+    4.  **下游返回**：函数执行完毕返回后，控制权交还给汇编入口 `__trapret`。依赖本函数对 `tf->epc` 的正确修改，`RESTORE_ALL` 恢复现场后执行 `sret` 才不会陷入死循环。
 
 #### 最终提示词
 
 以下是经过迭代优化后，最终成功实现该功能的提示词：
 
 ```markdown
-[按照提示词模板，给出具体的提示词]
+[PROMPT]
+修改文件 kern/trap/trap.c，实现 exception_handler(struct trapframe *tf) 函数。当发生异常时，根据 tf->cause 进行分类处理，并正确更新 tf->epc，确保 sret 返回后不会重复触发异常。
+
+[RELY]
+1. 结构体：struct trapframe *tf（包含 cause, epc）。
+2. 宏定义：CAUSE_ILLEGAL_INSTRUCTION, CAUSE_BREAKPOINT。
+3. 已有函数：cprintf(), print_trapframe(tf)。
+
+[GUARANTEE]
+必须实现或修改的接口：
+void exception_handler(struct trapframe *tf);
+
+[SPECIFICATION]
+**Pre-Condition**:
+- 硬件已触发异常，SAVE_ALL 宏已将上下文保存至 tf 中，tf->cause 和 tf->epc 已就绪。
+**Post-Condition**:
+1. 若 tf->cause == CAUSE_ILLEGAL_INSTRUCTION：
+   - 输出非法指令异常提示及当前 epc。
+   - 根据指令长度更新 tf->epc（若指令低 2 位为 0x3，则 tf->epc += 4；否则 tf->epc += 2）。
+2. 若 tf->cause == CAUSE_BREAKPOINT：
+   - 输出断点异常提示及当前 epc。
+   - 根据指令长度更新 tf->epc（规则同上）。
+3. 对于其他异常：
+   - 调用 print_trapframe(tf) 进行兜底输出。
+**Requirements**:
+- 严禁修改函数签名。
+- 必须严格处理 tf->epc，防止陷入异常死循环。
 ```
 
 #### 实现迭代过程
 
-本模块的实现经历了 [N] 次迭代，过程如下：
+本模块的实现经历了 2 次迭代，过程如下：
 
 ---
 
@@ -351,19 +384,27 @@ int another_function(int arg);
 
 **遇到的问题：**
 
-- 问题1：问题描述、错误信息和原因分析
-- 问题2：问题描述、错误信息和原因分析
+- 问题1：最初让 AI 生成的代码直接打印异常信息，没有更新 tf->epc。如果在测试时触发 ebreak，系统返回后会反复执行同一条断点指令，导致死循环卡死。
 
 **问题解决策略：**
 
-- 针对问题1：[说明如何修改提示词]
-- 针对问题2：[说明如何修改提示词]
+- 针对问题1：在 Prompt 的 [SPECIFICATION] 中明确强调：“必须更新 tf->epc 以跳过异常指令”。同时要求 AI 增加对指令长度的判断（读取低两位是否为 0x3）。
 
-如果没有问题：
+##### 第二次迭代
+
+如果设计的prompt生成代码后出现问题：
+
+**遇到的问题：**
+
+- 问题2：AI 生成的代码默认了所有指令都是 32 位，直接写了 tf->epc += 4;。但 RISC-V 存在 16 位压缩指令，如果遇到 16 位非法指令，epc 加 4 就会导致跳转错位。
+
+**问题解决策略：**
+
+- 针对问题2：进一步完善 Prompt，明确说明需要读取内存地址 (*(uint16_t *)(tf->epc) & 0x3) 来判断指令是 2 字节还是 4 字节，并在代码中添加了条件分支。
 
 **最终结果：**
 
-经过 [N] 次迭代，该模块最终：
+经过 2 次迭代，该模块最终：
 
 - ✅ 编译通过
 - ✅ 所有相关测试通过
@@ -371,23 +412,9 @@ int another_function(int arg);
 
 **关键改进点总结（如有）：**
 
-1. [改进点1：例如，在 [RELY] 中补充了完整的系统调用号定义]
-2. [改进点2：例如，在 [SPECIFICATION] 中明确了异常处理的边界条件]
-3. [改进点3：例如，增加了对用户指针合法性检查的要求]
-
----
-
-##### 第二次迭代（如有）
-
-[按照和第一次迭代相同的格式]
-
----
-
-##### 第三次迭代（如有）
-
-[按照和第一次迭代相同的格式]
-
----
+1. 在 [SPECIFICATION] 中明确了 tf->epc 必须更新，杜绝了死循环。
+2. 增加了对指令长度编码的判断要求，防止了 16 位压缩指令导致的跳转越界。
+3. 强调了未知异常需要通过 print_trapframe(tf) 兜底，增强了内核的鲁棒性。
 
 ## 五、测试与验证
 
