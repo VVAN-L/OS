@@ -90,6 +90,36 @@ void print_regs(struct pushregs *gpr) {
 /* Implemented by the member responsible for exception handling. */
 void exception_handler(struct trapframe *tf);
 
+//lab3 exception_handler 2412143
+void exception_handler(struct trapframe *tf) {
+    switch (tf->cause) {
+        case CAUSE_ILLEGAL_INSTRUCTION:
+            cprintf("Illegal instruction caught at 0x%lx\n", tf->epc);
+            // 判断指令长度：读取当前指令的低2位，如果是11(即0x3)，则是32位指令
+            if ((*(uint16_t *)(tf->epc) & 0x3) == 0x3) {
+                tf->epc += 4; // 32位指令，跳过4个字节
+            } else {
+                tf->epc += 2; // 16位压缩指令，跳过2个字节
+            }
+            break;
+
+        case CAUSE_BREAKPOINT:
+            cprintf("Breakpoint caught at 0x%lx\n", tf->epc);
+            // 同样需要判断指令长度并更新 epc
+            if ((*(uint16_t *)(tf->epc) & 0x3) == 0x3) {
+                tf->epc += 4;
+            } else {
+                tf->epc += 2;
+            }
+            break;
+
+        default:
+            // 对于其他异常，调用 print_trapframe 打印完整信息
+            print_trapframe(tf);
+            break;
+    }
+}
+
 void interrupt_handler(struct trapframe *tf) {
     static size_t printed_count = 0;
     uintptr_t cause = (tf->cause << 1) >> 1;
