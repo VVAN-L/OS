@@ -37,7 +37,7 @@ trap() 返回以后，应能够进入 \_\_trapret，完成上下文恢复并通�
 
 [SPECIFICATION]
 
-## RESTORE_ALL
+RESTORE_ALL
 
 使被打断程序的执行状态能够从 Trap frame 中恢复出来。
 
@@ -45,7 +45,7 @@ trap() 返回以后，应能够进入 \_\_trapret，完成上下文恢复并通�
 
 对于 RESTORE_ALL 而言，对外表现为“输入当前 Trap frame，输出恢复后的处理器执行状态”
 
-## \_\_alltraps
+\_\_alltraps
 
 需要负责建立汇编 Trap 入口与 C 语言 trap(struct trapframe \*tf) 之间的调用关系，使保存后的 Trap frame 能够按照 RISC-V 调用约定正确传递给 trap()；这个模块完成后，系统应能够形成完整的“Trap 进入 -> 上下文保存 -> C 语言处理 -> 上下文恢复 -> Trap 返回”闭环。
 
@@ -59,15 +59,13 @@ trap() 返回以后，应能够进入 \_\_trapret，完成上下文恢复并通�
 - 需要注释的部分要保持注释简洁
 - 工作完成后，你需要分析Makefile，并给我基于当前功能可用的测试方案（这并不意味着你可以修改现有测试或生成测试）。
 
-
-
 ## 2412143 林家熠
 
-  ```markdown
+```markdown
 [PROMPT]
 请完成 RISC-V Lab3 的中断处理模块。先检查实验框架的真实定义，
 在 OS-lab3/code/kern/trap/trap.c 的 lab3 function2 填空区域中，
-仅实现我负责的 interrupt_handler(struct trapframe *tf)。
+仅实现我负责的 interrupt_handler(struct trapframe \*tf)。
 保留 lab3 注释，把本人负责区域的 YOUR CODE 替换为 2412934。
 不得修改已有其他函数，不实现 exception_handler，不完成 challenge。
 需要时可在该区域添加头文件引用、条件宏和函数声明。
@@ -85,13 +83,14 @@ clock 模块提供 volatile size_t ticks；trap.c 已定义 TICK_NUM 为 100。
 exception_handler 由其他成员实现；如需声明可以添加，但不能提供空实现。
 
 [GUARANTEE]
-交付函数：void interrupt_handler(struct trapframe *tf);
+交付函数：void interrupt_handler(struct trapframe \*tf);
 实现中断类型区分、持续时钟事件、单次计数、周期统计和达到阈值后关机。
 未知中断必须打印完整 Trap frame。
 保持函数签名及现场返回语义，不修改 tf->epc 和 tf->cause。
 交付范围限于本人填空区域，并提供真实的验证记录。
 
 [SPECIFICATION]
+
 1. 输入由框架提供的有效 trapframe 指针。使用无符号运算清除
    cause 的最高位，在局部变量中取得中断原因码。
 2. 对 IRQ_S_TIMER，先调用 clock_set_next_event()，再使 ticks
@@ -108,3 +107,51 @@ exception_handler 由其他成员实现；如需声明可以添加，但不能�
    才能标记为通过，不把语法检查等同于完整构建或 QEMU 测试。
 ```
 
+## 2412934 王海沛
+
+[PROMPT]
+
+请完成 RISC-V Lab3 的中断处理模块。先检查实验框架的真实定义，
+在 OS-lab3/code/kern/trap/trap.c 的 lab3 function2 填空区域中，
+仅实现我负责的 interrupt_handler(struct trapframe \*tf)。
+保留 lab3 注释，把本人负责区域的 YOUR CODE 替换为 2412934。
+不得修改已有其他函数，不实现 exception_handler，不完成 challenge。
+需要时可在该区域添加头文件引用、条件宏和函数声明。
+
+[RELY]
+
+可以依赖框架已有的 struct trapframe，其中 cause 和 epc 为 uintptr_t。
+trap_dispatch 已根据 cause 最高位区分中断与异常。
+使用 riscv.h 中实际存在的 IRQ_U/S/H/M_SOFT、IRQ_U/S/H/M_TIMER、
+IRQ_U/S/H/M_EXT 宏进行分类，不自行编造中断编号。
+可以调用 clock_set_next_event()、print_ticks()、print_trapframe(tf)、
+cprintf() 和 libs/sbi.h 声明的 sbi_shutdown()。
+clock 模块提供 volatile size_t ticks；trap.c 已定义 TICK_NUM 为 100。
+若 SHUTDOWN_AFTER 已有定义则沿用；当前框架未定义时，使用
+#ifndef 提供默认值 10，并在报告说明这是默认选择。
+exception_handler 由其他成员实现；如需声明可以添加，但不能提供空实现。
+
+[GUARANTEE]
+
+交付函数：void interrupt_handler(struct trapframe \*tf);
+实现中断类型区分、持续时钟事件、单次计数、周期统计和达到阈值后关机。
+未知中断必须打印完整 Trap frame。
+保持函数签名及现场返回语义，不修改 tf->epc 和 tf->cause。
+交付范围限于本人填空区域，并提供真实的验证记录。
+
+[SPECIFICATION]
+
+1. 输入由框架提供的有效 trapframe 指针。使用无符号运算清除
+   cause 的最高位，在局部变量中取得中断原因码。
+2. 对 IRQ_S_TIMER，先调用 clock_set_next_event()，再使 ticks
+   恰好增加一次，不能遗漏预约，也不能重复计数。
+3. 当 ticks % TICK_NUM == 0 时，调用已有 print_ticks()，
+   保持框架的“100 ticks”输出格式，不另写一套统计输出。
+4. 用静态计数记录实际调用统计输出的次数；达到 SHUTDOWN_AFTER
+   时调用 sbi_shutdown()。默认阈值下预期第 1000 次中断关机。
+5. 其他已列出的中断输出对应类型提示，例如 IRQ_S_SOFT 输出
+   “Supervisor software interrupt”，各分支不得意外贯穿。
+6. 未匹配原因调用 print_trapframe(tf)，不实现额外恢复逻辑。
+7. 异步中断处理不增加 epc，正常路径返回统一 Trap 返回流程。
+8. 使用项目交叉编译器检查语法和声明。只有实际执行并成功的检查
+   才能标记为通过，不把语法检查等同于完整构建或 QEMU 测试。

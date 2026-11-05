@@ -419,6 +419,8 @@ void exception_handler(struct trapframe \*tf);
 
 ![make qemu 测试结果截图](./images/make_qemu.png)
 
+![make grade 测试结果截图](./images/make_grade.png)
+
 ---
 
 ## 六、实验总结与收获
