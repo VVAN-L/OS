@@ -34,11 +34,11 @@
 
 你们使用的 AI 工具
 
-| 成员           | AI 编程工具          | 底层模型            | 备注 |
-| -------------- | -------------------- | ------------------- | ---- |
-| 2411858-王钟岳 | Codex（VS Code插件） | GPT-6 Astra         |      |
-| 2412934-王海沛 | Codex（VS Code插件） | GPT-6.1Sol   |      |
-| 2412143-林家熠 | deepseek             | deepseek            |      |
+| 成员           | AI 编程工具          | 底层模型    | 备注 |
+| -------------- | -------------------- | ----------- | ---- |
+| 2411858-王钟岳 | Codex（VS Code插件） | GPT-6 Astra |      |
+| 2412934-王海沛 | Codex（VS Code插件） | GPT-6.1Sol  |      |
+| 2412143-林家熠 | deepseek             | deepseek    |      |
 
 **说明：**
 
@@ -51,19 +51,15 @@
 
 ### 2.1 本章节的逻辑主线
 
-[请用自己的话描述本章实验的核心主线，例如：
+本章以中断处理机制为核心主题，着重讲解了 riscv 的中断处理机制、中断入口点、中断处理程序、时钟中断以及中断的开启与关闭，并用完成了以下任务：
 
-- 本章围绕哪个核心主题展开？（例如：用户进程管理、虚拟内存、文件系统等）
-- 整个实验解决什么问题？（例如：如何让用户程序运行在操作系统之上）]
+1. 通过汇编语言实现了上下文的保存和恢复。
+2. 实现了中断与异常的处理功能。
 
 ### 2.2 功能的逐步实现
 
-[说明本章实验是按照什么顺序逐步实现各个功能的，以及为什么要按这个顺序，例如：
-
-1. 首先实现**功能A** → 为什么首先实现这个？（例如：建立系统调用接口是后续所有用户态功能的基础）
-2. 接着再完善**功能B** → 为什么接着实现这个？（例如：有了系统调用后，需要能够加载和启动第一个用户进程）
-3. 然后完成**功能C** → 为什么然后实现这个？（例如：有了第一个进程后，需要实现进程复制功能）
-4. 最后补充了**功能D** → 为什么最后实现这个？（例如：最后完善进程退出和清理机制，形成完整闭环）]
+1. 首先实现了上下文的保存和恢复功能：为了使中断不影响进程的正常执行，必须要在中断前保存进程的执行情况（即上下文），并在中断结束后恢复至原样。
+2. 然后完成了中断与异常处理功能：riscv 将中断分成了中断（异步）和异常（同步），又在两者下细分了多种类别。系统需要根据具体情形判断所属的类别。
 
 ---
 
@@ -89,17 +85,9 @@ __alltraps
 
 **功能说明：**
 
-完成 Trap 从“进入内核”到“返回原执行流”之间的底层上下文管理；
+**alltraps：Trap 的统一入口。 先通过 SAVE_ALL 保存寄存器和异常状态，建立 Trap frame；再将其地址放入参数寄存器 a0，调用 C 函数 trap(tf)；处理完成后进入**trapret。
 
-保持“Trap frame 布局、上下文保存与恢复、函数调用约定、Trap 返回状态”之间的一致性。
-
-对外的接口：Trap 发生以后，系统应能够通过 \_\_alltraps 建立完整的 Trap frame，并将其作为 struct trapframe \* 传递给：
-
-```c
-void trap(struct trapframe *tf);
-```
-
-trap() 返回以后，应能够进入 \_\_trapret，完成上下文恢复并通过 sret 返回。
+RESTORE_ALL：恢复被打断的执行状态。 从 Trap frame 恢复 sstatus、sepc 和通用寄存器，最后恢复原栈指针 sp。随后由 \_\_trapret 中的 sret 返回执行流。
 
 #### 最终提示词
 
@@ -210,7 +198,7 @@ void interrupt_handler(struct trapframe *tf);
 [PROMPT]
 请完成 RISC-V Lab3 的中断处理模块。先检查实验框架的真实定义，
 在 OS-lab3/code/kern/trap/trap.c 的 lab3 function2 填空区域中，
-仅实现我负责的 interrupt_handler(struct trapframe *tf)。
+仅实现我负责的 interrupt_handler(struct trapframe \*tf)。
 保留 lab3 注释，把本人负责区域的 YOUR CODE 替换为 2412934。
 不得修改已有其他函数，不实现 exception_handler，不完成 challenge。
 需要时可在该区域添加头文件引用、条件宏和函数声明。
@@ -228,13 +216,14 @@ clock 模块提供 volatile size_t ticks；trap.c 已定义 TICK_NUM 为 100。
 exception_handler 由其他成员实现；如需声明可以添加，但不能提供空实现。
 
 [GUARANTEE]
-交付函数：void interrupt_handler(struct trapframe *tf);
+交付函数：void interrupt_handler(struct trapframe \*tf);
 实现中断类型区分、持续时钟事件、单次计数、周期统计和达到阈值后关机。
 未知中断必须打印完整 Trap frame。
 保持函数签名及现场返回语义，不修改 tf->epc 和 tf->cause。
 交付范围限于本人填空区域，并提供真实的验证记录。
 
 [SPECIFICATION]
+
 1. 输入由框架提供的有效 trapframe 指针。使用无符号运算清除
    cause 的最高位，在局部变量中取得中断原因码。
 2. 对 IRQ_S_TIMER，先调用 clock_set_next_event()，再使 ticks
@@ -281,8 +270,6 @@ exception_handler 由其他成员实现；如需声明可以添加，但不能�
 
 - 在 [SPECIFICATION] 中明确每次预约、每次只计数一次、统计次数决定关机，以及保持 epc 不变，避免遗漏关键约束。
 
-
-
 **最终结果：**
 
 经过 1 次迭代，该模块最终：
@@ -305,10 +292,6 @@ exception_handler 由其他成员实现；如需声明可以添加，但不能�
 
 ---
 
-
-
-
-
 ### exception_handler 函数：
 
 **负责人：** 2412143-林家熠
@@ -324,19 +307,19 @@ void exception_handler(struct trapframe *tf);
 
 **功能说明：**
 
-*   **该模块在整个系统中的作用**：
-    `exception_handler` 是 Trap 处理框架中专门负责**同步异常**（Synchronous Exception）的核心枢纽。它的作用是当 CPU 执行指令发生错误（如非法指令、断点）时，接管控制权并记录现场，防止内核直接崩溃。它是保障内核健壮性的重要防线。
+- **该模块在整个系统中的作用**：
+  `exception_handler` 是 Trap 处理框架中专门负责**同步异常**（Synchronous Exception）的核心枢纽。它的作用是当 CPU 执行指令发生错误（如非法指令、断点）时，接管控制权并记录现场，防止内核直接崩溃。它是保障内核健壮性的重要防线。
 
-*   **需要处理的主要场景**：
-    1.  **非法指令异常（`CAUSE_ILLEGAL_INSTRUCTION`）**：当前执行流遇到无法识别的指令。需输出异常信息，并动态计算指令长度以更新 `epc`。
-    2.  **断点异常（`CAUSE_BREAKPOINT`）**：程序执行了 `ebreak` 指令。常用于内核调试。同样需输出信息并更新 `epc` 越过断点。
-    3.  **其他未知异常（Default）**：对于框架未要求具体处理的其他异常，调用 `print_trapframe(tf)` 打印完整的寄存器现场进行兜底排查。
+- **需要处理的主要场景**：
+  1.  **非法指令异常（`CAUSE_ILLEGAL_INSTRUCTION`）**：当前执行流遇到无法识别的指令。需输出异常信息，并动态计算指令长度以更新 `epc`。
+  2.  **断点异常（`CAUSE_BREAKPOINT`）**：程序执行了 `ebreak` 指令。常用于内核调试。同样需输出信息并更新 `epc` 越过断点。
+  3.  **其他未知异常（Default）**：对于框架未要求具体处理的其他异常，调用 `print_trapframe(tf)` 打印完整的寄存器现场进行兜底排查。
 
-*   **与其他模块的交互关系**：
-    1.  **上游入口**：接收由 `trap_dispatch()` 函数根据 `tf->cause` 的正负号（最高位）分发而来的调用。
-    2.  **数据依赖**：直接操作 `struct trapframe *tf` 结构体，读取 `cause` 判断类型，读取并修改 `epc`。
-    3.  **输出接口**：依赖 `cprintf()` 打印日志，依赖 `print_trapframe()` 打印底层寄存器状态。
-    4.  **下游返回**：函数执行完毕返回后，控制权交还给汇编入口 `__trapret`。依赖本函数对 `tf->epc` 的正确修改，`RESTORE_ALL` 恢复现场后执行 `sret` 才不会陷入死循环。
+- **与其他模块的交互关系**：
+  1.  **上游入口**：接收由 `trap_dispatch()` 函数根据 `tf->cause` 的正负号（最高位）分发而来的调用。
+  2.  **数据依赖**：直接操作 `struct trapframe *tf` 结构体，读取 `cause` 判断类型，读取并修改 `epc`。
+  3.  **输出接口**：依赖 `cprintf()` 打印日志，依赖 `print_trapframe()` 打印底层寄存器状态。
+  4.  **下游返回**：函数执行完毕返回后，控制权交还给汇编入口 `__trapret`。依赖本函数对 `tf->epc` 的正确修改，`RESTORE_ALL` 恢复现场后执行 `sret` 才不会陷入死循环。
 
 #### 最终提示词
 
@@ -344,21 +327,24 @@ void exception_handler(struct trapframe *tf);
 
 ```markdown
 [PROMPT]
-修改文件 kern/trap/trap.c，实现 exception_handler(struct trapframe *tf) 函数。当发生异常时，根据 tf->cause 进行分类处理，并正确更新 tf->epc，确保 sret 返回后不会重复触发异常。
+修改文件 kern/trap/trap.c，实现 exception_handler(struct trapframe \*tf) 函数。当发生异常时，根据 tf->cause 进行分类处理，并正确更新 tf->epc，确保 sret 返回后不会重复触发异常。
 
 [RELY]
-1. 结构体：struct trapframe *tf（包含 cause, epc）。
+
+1. 结构体：struct trapframe \*tf（包含 cause, epc）。
 2. 宏定义：CAUSE_ILLEGAL_INSTRUCTION, CAUSE_BREAKPOINT。
 3. 已有函数：cprintf(), print_trapframe(tf)。
 
 [GUARANTEE]
 必须实现或修改的接口：
-void exception_handler(struct trapframe *tf);
+void exception_handler(struct trapframe \*tf);
 
 [SPECIFICATION]
 **Pre-Condition**:
+
 - 硬件已触发异常，SAVE_ALL 宏已将上下文保存至 tf 中，tf->cause 和 tf->epc 已就绪。
-**Post-Condition**:
+  **Post-Condition**:
+
 1. 若 tf->cause == CAUSE_ILLEGAL_INSTRUCTION：
    - 输出非法指令异常提示及当前 epc。
    - 根据指令长度更新 tf->epc（若指令低 2 位为 0x3，则 tf->epc += 4；否则 tf->epc += 2）。
@@ -367,7 +353,8 @@ void exception_handler(struct trapframe *tf);
    - 根据指令长度更新 tf->epc（规则同上）。
 3. 对于其他异常：
    - 调用 print_trapframe(tf) 进行兜底输出。
-**Requirements**:
+     **Requirements**:
+
 - 严禁修改函数签名。
 - 必须严格处理 tf->epc，防止陷入异常死循环。
 ```
@@ -400,7 +387,7 @@ void exception_handler(struct trapframe *tf);
 
 **问题解决策略：**
 
-- 针对问题2：进一步完善 Prompt，明确说明需要读取内存地址 (*(uint16_t *)(tf->epc) & 0x3) 来判断指令是 2 字节还是 4 字节，并在代码中添加了条件分支。
+- 针对问题2：进一步完善 Prompt，明确说明需要读取内存地址 (_(uint16_t _)(tf->epc) & 0x3) 来判断指令是 2 字节还是 4 字节，并在代码中添加了条件分支。
 
 **最终结果：**
 
@@ -423,9 +410,14 @@ void exception_handler(struct trapframe *tf);
 - 测试通过的结果（make grade），只有一个
 -->
 
+1. 补齐了lab2中实现的 page_init 函数和 Best-Fit 算法，在 memlayout.h 中补充了page_init 依赖的两个宏 KERNEL_BEGIN_PADDR 和 PHYSICAL_MEMORY_END。
+2. 执行 make qemu 测试成功。
+3. 按测试要求修改和补充了输出格式。
+4. 执行 make grade 测试成功。
+
 **测试截图：**
 
-![测试结果截图](./images/test_result.png)
+![make qemu 测试结果截图](./images/make_qemu.png)
 
 ---
 
@@ -435,14 +427,14 @@ void exception_handler(struct trapframe *tf);
 
 1. 列出你们认为本实验中重要的知识点，以及与对应的 OS 原理中的知识点，并简要说明二者的含义、关系和差异
 
-| 实验知识点 | 对应原理及关系、差异 |
-| --- | --- |
-| stvec 和汇编入口 | 对应中断向量与控制转移；本实验采用 RISC-V 的具体寄存器和入口实现，原理讨论更一般化。 |
-| trapframe 保存与恢复 | 对应执行现场保护；这里恢复同一执行流，尚不等于切换到另一进程。 |
-| cause 类型分发 | 对应异步中断与同步异常的区分；实验通过编码最高位和原因字段落实分类。 |
-| 时钟重设与 ticks | 对应周期时钟和内核时间维护；此处基于一次次预约形成连续事件，ticks 只是事件计数，并非精确墙上时间。 |
-| epc 与返回路径 | 对应精确异常和程序续执行；本任务不改变中断返回地址，异常模块可能需要按指令语义调整。 |
-| SBI 定时和关机 | 对应特权分层及固件接口；S 态内核通过接口请求底层服务，而非直接实现机器级硬件控制。 |
+| 实验知识点           | 对应原理及关系、差异                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| stvec 和汇编入口     | 对应中断向量与控制转移；本实验采用 RISC-V 的具体寄存器和入口实现，原理讨论更一般化。               |
+| trapframe 保存与恢复 | 对应执行现场保护；这里恢复同一执行流，尚不等于切换到另一进程。                                     |
+| cause 类型分发       | 对应异步中断与同步异常的区分；实验通过编码最高位和原因字段落实分类。                               |
+| 时钟重设与 ticks     | 对应周期时钟和内核时间维护；此处基于一次次预约形成连续事件，ticks 只是事件计数，并非精确墙上时间。 |
+| epc 与返回路径       | 对应精确异常和程序续执行；本任务不改变中断返回地址，异常模块可能需要按指令语义调整。               |
+| SBI 定时和关机       | 对应特权分层及固件接口；S 态内核通过接口请求底层服务，而非直接实现机器级硬件控制。                 |
 
 2. 列出你们认为 OS 原理中很重要、但在本实验中没有对应上的知识点
 
