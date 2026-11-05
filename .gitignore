@@ -4,3 +4,4 @@ riscv/
 *.tar.xz
 code/bin
 code/obj
+*:Zone.Identifier
