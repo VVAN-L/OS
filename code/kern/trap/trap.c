@@ -94,7 +94,7 @@ void exception_handler(struct trapframe *tf);
 void exception_handler(struct trapframe *tf) {
     switch (tf->cause) {
         case CAUSE_ILLEGAL_INSTRUCTION:
-            cprintf("Illegal instruction caught at 0x%lx\n", tf->epc);
+            cprintf("Illegal instruction at 0x%lx\n", tf->epc);
             // 判断指令长度：读取当前指令的低2位，如果是11(即0x3)，则是32位指令
             if ((*(uint16_t *)(tf->epc) & 0x3) == 0x3) {
                 tf->epc += 4; // 32位指令，跳过4个字节
@@ -104,7 +104,7 @@ void exception_handler(struct trapframe *tf) {
             break;
 
         case CAUSE_BREAKPOINT:
-            cprintf("Breakpoint caught at 0x%lx\n", tf->epc);
+            cprintf("Breakpoint at 0x%lx\n", tf->epc);
             // 同样需要判断指令长度并更新 epc
             if ((*(uint16_t *)(tf->epc) & 0x3) == 0x3) {
                 tf->epc += 4;
