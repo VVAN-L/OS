@@ -80,7 +80,7 @@ void print_regs(struct pushregs *gpr) {
     cprintf("  t6       0x%08x\n", gpr->t6);
 }
 
-//lab3 function2 2412934
+
 #include <sbi.h>
 
 #ifndef SHUTDOWN_AFTER
@@ -119,7 +119,7 @@ void exception_handler(struct trapframe *tf) {
             break;
     }
 }
-
+//lab3 interrupt_handler 2412934
 void interrupt_handler(struct trapframe *tf) {
     static size_t printed_count = 0;
     uintptr_t cause = (tf->cause << 1) >> 1;
