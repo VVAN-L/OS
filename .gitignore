@@ -5,3 +5,4 @@ riscv/
 code/bin
 code/obj
 *:Zone.Identifier
+.vscode

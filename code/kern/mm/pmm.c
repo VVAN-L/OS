@@ -220,7 +220,67 @@ struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store)
     return NULL;
 }
 
-//LAB4 function1 YOUR CODE
+//LAB4 function1 2411858
+static void mapping_tlb_invalidate(pde_t *pgdir, uintptr_t la)
+{
+    // 保证页表写入不会被编译器移到 TLB 刷新之后。
+    asm volatile("" ::: "memory");
+    tlb_invalidate(pgdir, la);
+    asm volatile("" ::: "memory");
+}
+
+void page_remove(pde_t *pgdir, uintptr_t la)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    if (ptep == NULL || !(*ptep & PTE_V))
+    {
+        return;
+    }
+    struct Page *page = pte2page(*ptep);
+    *ptep = 0;
+    mapping_tlb_invalidate(pgdir, la);
+    if (page_ref_dec(page) == 0)
+    {
+        free_page(page);
+    }
+}
+
+int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
+{
+    pde_t *pdep = &pgdir[PDX1(la)];
+    pde_t old_pde = *pdep;
+    pte_t *ptep = get_pte(pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        // get_pte 可能只建好一级页表，失败时回收本次新增部分。
+        if (!(old_pde & PTE_V) && (*pdep & PTE_V))
+        {
+            struct Page *table = pde2page(*pdep);
+            *pdep = old_pde;
+            mapping_tlb_invalidate(pgdir, la);
+            set_page_ref(table, 0);
+            free_page(table);
+        }
+        return -E_NO_MEM;
+    }
+
+    // 先增加引用，同页重映射时抵消，避免误释放目标页。
+    page_ref_inc(page);
+    if (*ptep & PTE_V)
+    {
+        if (pte2page(*ptep) == page)
+        {
+            page_ref_dec(page);
+        }
+        else
+        {
+            page_remove(pgdir, la);
+        }
+    }
+    *ptep = pte_create(page2ppn(page), perm);
+    mapping_tlb_invalidate(pgdir, la);
+    return 0;
+}
 
 
 
