@@ -84,7 +84,100 @@ void print_regs(struct pushregs *gpr)
 extern struct mm_struct *check_mm_struct;
 
 //lab3 请补充你在lab3中的代码
+#include <sbi.h>
 
+#ifndef SHUTDOWN_AFTER
+#define SHUTDOWN_AFTER 10
+#endif
+
+/* Implemented by the member responsible for exception handling. */
+void exception_handler(struct trapframe *tf);
+
+//lab3 exception_handler 2412143
+void exception_handler(struct trapframe *tf) {
+    switch (tf->cause) {
+        case CAUSE_ILLEGAL_INSTRUCTION:
+            cprintf("Illegal instruction at 0x%lx\n", tf->epc);
+            // 判断指令长度：读取当前指令的低2位，如果是11(即0x3)，则是32位指令
+            if ((*(uint16_t *)(tf->epc) & 0x3) == 0x3) {
+                tf->epc += 4; // 32位指令，跳过4个字节
+            } else {
+                tf->epc += 2; // 16位压缩指令，跳过2个字节
+            }
+            break;
+
+        case CAUSE_BREAKPOINT:
+            cprintf("Breakpoint at 0x%lx\n", tf->epc);
+            // 同样需要判断指令长度并更新 epc
+            if ((*(uint16_t *)(tf->epc) & 0x3) == 0x3) {
+                tf->epc += 4;
+            } else {
+                tf->epc += 2;
+            }
+            break;
+
+        default:
+            // 对于其他异常，调用 print_trapframe 打印完整信息
+            print_trapframe(tf);
+            break;
+    }
+}
+//lab3 interrupt_handler 2412934
+void interrupt_handler(struct trapframe *tf) {
+    static size_t printed_count = 0;
+    uintptr_t cause = (tf->cause << 1) >> 1;
+
+    switch (cause) {
+    case IRQ_U_SOFT:
+        cprintf("User software interrupt\n");
+        break;
+    case IRQ_S_SOFT:
+        cprintf("Supervisor software interrupt\n");
+        break;
+    case IRQ_H_SOFT:
+        cprintf("Hypervisor software interrupt\n");
+        break;
+    case IRQ_M_SOFT:
+        cprintf("Machine software interrupt\n");
+        break;
+    case IRQ_U_TIMER:
+        cprintf("User timer interrupt\n");
+        break;
+    case IRQ_S_TIMER:
+        clock_set_next_event();
+        ticks++;
+        if (ticks % TICK_NUM == 0) {
+            print_ticks();
+            printed_count++;
+            if (printed_count >= SHUTDOWN_AFTER) {
+                sbi_shutdown();
+            }
+        }
+        break;
+    case IRQ_H_TIMER:
+        cprintf("Hypervisor timer interrupt\n");
+        break;
+    case IRQ_M_TIMER:
+        cprintf("Machine timer interrupt\n");
+        break;
+    case IRQ_U_EXT:
+        cprintf("User external interrupt\n");
+        break;
+    case IRQ_S_EXT:
+        cprintf("Supervisor external interrupt\n");
+        break;
+    case IRQ_H_EXT:
+        cprintf("Hypervisor external interrupt\n");
+        break;
+    case IRQ_M_EXT:
+        cprintf("Machine external interrupt\n");
+        break;
+    default:
+        cprintf("Unknown interrupt: cause %lu\n", (unsigned long)cause);
+        print_trapframe(tf);
+        break;
+    }
+}
 
 
 /* *
