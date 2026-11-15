@@ -39,3 +39,39 @@ page_remove 则应作为一个幂等删除接口存在，目标地址有映射�
 **Requirements**:
 
 这里最关键的是保持“页表项内容、物理页引用计数、TLB 状态”三者同步。page_insert 不能简单覆盖旧项，而要正确处理原地址已经映射到同一物理页、或者原地址已经映射到其他物理页这两种情况；page_remove 也不能假定目标地址一定存在有效映射。由于 get_pte(pgdir, la, 1) 可能需要分配中间级页表页，所以映射建立过程本身可能失败，调用路径必须能正确返回错误并保持系统状态干净。所有页表更新完成后都要考虑对应 TLB 失效，否则测试中会出现看似已更新、实际上仍在使用旧翻译结果的情况。
+
+## 2412143 林家熠
+
+```markdown
+[PROMPT]
+修改文件 kern/process/proc.c，实现进程创建及初始化功能。补全 alloc_proc, proc_init, kernel_thread, do_fork, copy_thread, copy_mm 六个函数，成功创建 idleproc 和 initproc 两个内核线程。
+
+[RELY]
+1. 数据结构：struct proc_struct, struct context, struct trapframe, list_entry_t。
+2. 全局变量：proc_list, hash_list, idleproc, initproc, current, nr_process, boot_pgdir_pa。
+3. 已有接口：kmalloc, memset, list_init, read_csr(sstatus), local_intr_save/restore, setup_kstack, get_pid, hash_proc。
+4. 汇编符号：bootstack, kernel_thread_entry, forkret。
+
+[GUARANTEE]
+必须实现或修改的接口：
+- static struct proc_struct *alloc_proc(void);
+- void proc_init(void);
+- int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags);
+- int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf);
+- static void copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf);
+- static int copy_mm(uint32_t clone_flags, struct proc_struct *proc);
+严禁修改函数签名，严禁破坏原有的全局变量定义。
+
+[SPECIFICATION]
+**Pre-Condition**: 物理内存管理和中断系统已初始化完毕，可以调用 kmalloc 和分配物理页。
+**Post-Condition**:
+1. alloc_proc: 分配 PCB，初始化状态为 PROC_UNINIT，pid=-1，pgdir=boot_pgdir_pa，初始化链表节点，将 context 和 name 清零。
+2. proc_init: 初始化 proc_list 和 hash_list；创建 idleproc 并设为 PROC_RUNNABLE，pid=0，kstack=bootstack，need_resched=1，current=idleproc；通过 kernel_thread 创建 initproc，加入链表并设为 RUNNABLE。
+3. kernel_thread: 构造临时 trapframe，设置 s0=fn, s1=arg；读取 sstatus，清除 SIE 位，设置 SPP 和 SPIE 位；epc 指向 kernel_thread_entry；调用 do_fork。
+4. do_fork: 依次调用 alloc_proc, setup_kstack, copy_mm, copy_thread；使用 local_intr_save 保护临界区，分配 pid，加入全局链表和哈希表，设为 PROC_RUNNABLE。注意处理分配失败时的回滚清理。
+5. copy_thread: 在内核栈顶分配 tf 空间并复制 tf，设置 a0=0 (子进程返回值)，若 esp 为 0 则 sp 指向 tf；设置 context.ra=forkret，context.sp=tf。
+6. copy_mm: 当前为空实现，直接返回 0。
+**Requirements**: 注意 PCB 生命周期状态与资源挂接的顺序，防止内存泄漏。
+```
+
+
