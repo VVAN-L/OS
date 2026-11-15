@@ -220,5 +220,159 @@ init_main(void *arg)
 
 //LAB4 function2 YOUR CODE
 
+// ==================== LAB4 function2 YOUR CODE ====================
+
+// 1. 分配并初始化进程控制块
+static struct proc_struct *
+alloc_proc(void) {
+    struct proc_struct *proc = kmalloc(sizeof(struct proc_struct));
+    if (proc != NULL) {
+        proc->state = PROC_UNINIT;
+        proc->pid = -1;
+        proc->runs = 0;
+        proc->kstack = 0;
+        proc->need_resched = 0;
+        proc->parent = NULL;
+        proc->mm = NULL;
+        memset(&(proc->context), 0, sizeof(struct context));
+        proc->tf = NULL;
+        proc->pgdir = boot_pgdir_pa;
+        proc->flags = 0;
+        memset(proc->name, 0, PROC_NAME_LEN);
+        list_init(&(proc->list_link));
+        list_init(&(proc->hash_link));
+    }
+    return proc;
+}
+
+// 2. 初始化进程子系统，创建 idleproc 和 initproc
+void
+proc_init(void) {
+    int i;
+    list_init(&proc_list);
+    for (i = 0; i < HASH_LIST_SIZE; i ++) {
+        list_init(hash_list + i);
+    }
+
+    // 创建 idleproc
+    if ((idleproc = alloc_proc()) == NULL) {
+        panic("cannot alloc idleproc.\n");
+    }
+    idleproc->pid = 0;
+    idleproc->state = PROC_RUNNABLE;
+    idleproc->kstack = (uintptr_t)bootstack;
+    idleproc->need_resched = 1;
+    set_proc_name(idleproc, "idle");
+    nr_process ++;
+    current = idleproc;
+
+    // 通过 kernel_thread 创建 initproc
+    int pid = kernel_thread(init_main, "Hello world!!", 0);
+    if (pid <= 0) {
+        panic("create init_main failed.\n");
+    }
+    initproc = find_proc(pid);
+    set_proc_name(initproc, "init");
+
+    assert(idleproc != NULL && idleproc->pid == 0);
+    assert(initproc != NULL && initproc->pid == 1);
+}
+
+// 3. 构造内核线程的临时中断帧
+int
+kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags) {
+    struct trapframe tf;
+    memset(&tf, 0, sizeof(struct trapframe));
+    
+    tf.gpr.s0 = (uintptr_t)fn;   // s0 存函数指针
+    tf.gpr.s1 = (uintptr_t)arg;  // s1 存参数
+    
+    tf.status = read_csr(sstatus);
+    tf.status &= ~SSTATUS_SIE;   // 关中断
+    tf.status |= SSTATUS_SPP;    // 返回 S 态
+    tf.status |= SSTATUS_SPIE;   // 开中断
+    
+    tf.epc = (uintptr_t)kernel_thread_entry; // 入口设置为汇编的 kernel_thread_entry
+    
+    return do_fork(clone_flags, 0, &tf);
+}
+
+// 4. 创建新线程的核心流程
+int
+do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
+    int ret = -E_NO_FREE_PROC;
+    struct proc_struct *proc;
+    if (nr_process >= MAX_PROCESS) {
+        goto fork_out;
+    }
+    ret = -E_NO_MEM;
+    
+    // 分配进程控制块
+    if ((proc = alloc_proc()) == NULL) {
+        goto fork_out;
+    }
+    proc->parent = current;
+
+    // 分配内核栈
+    if (setup_kstack(proc) != 0) {
+        goto bad_fork_cleanup_proc;
+    }
+    // 内存管理（本实验仅内核线程，占位）
+    if (copy_mm(clone_flags, proc) != 0) {
+        goto bad_fork_cleanup_kstack;
+    }
+    
+    // 复制上下文和中断帧
+    copy_thread(proc, stack, tf);
+
+    // 加入进程链表和哈希表，分配 PID
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    {
+        proc->pid = get_pid();
+        hash_proc(proc);
+        list_add(&proc_list, &(proc->list_link));
+        nr_process ++;
+    }
+    local_intr_restore(intr_flag);
+
+    // 唤醒新线程
+    proc->state = PROC_RUNNABLE;
+    ret = proc->pid;
+
+fork_out:
+    return ret;
+
+bad_fork_cleanup_kstack:
+    put_kstack(proc);
+bad_fork_cleanup_proc:
+    kfree(proc);
+    goto fork_out;
+}
+
+// 5. 复制中断帧和上下文
+static void
+copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf) {
+    // 在进程内核栈顶分配中断帧空间
+    proc->tf = (struct trapframe *)(proc->kstack + KSTACKSIZE) - 1;
+    *(proc->tf) = *tf;
+    
+    // 子进程返回值为 0
+    proc->tf->gpr.a0 = 0;
+    proc->tf->gpr.sp = (esp == 0) ? (uintptr_t)proc->tf : esp;
+    
+    // 上下文切换的入口为 forkret
+    proc->context.ra = (uintptr_t)forkret;
+    proc->context.sp = (uintptr_t)(proc->tf);
+}
+
+// 6. 复制内存管理结构（本实验为空）
+static int
+copy_mm(uint32_t clone_flags, struct proc_struct *proc) {
+    assert(current->mm == NULL);
+    return 0;
+}
+// ==================================================================== 
+
 
 //LAB4 function3 YOUR CODE
