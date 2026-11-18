@@ -80,6 +80,8 @@ static int nr_process = 0;
 void kernel_thread_entry(void);
 void forkrets(struct trapframe *tf);
 void switch_to(struct context *from, struct context *to);
+static int copy_mm(uint32_t clone_flags, struct proc_struct *proc);
+static void copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf);
 
 // set_proc_name - set the name of proc
 char *
@@ -375,4 +377,26 @@ copy_mm(uint32_t clone_flags, struct proc_struct *proc) {
 // ==================================================================== 
 
 
-//LAB4 function3 YOUR CODE
+void
+proc_run(struct proc_struct *proc) {
+    bool intr_flag;
+    local_intr_save(intr_flag);
+    if (proc != current) {
+        struct proc_struct *prev = current;
+        current = proc;
+        write_csr(satp, ((uintptr_t)SATP_MODE_SV39 << 60) |
+                        (proc->pgdir >> RISCV_PGSHIFT));
+        flush_tlb();
+        switch_to(&prev->context, &proc->context);
+    }
+    local_intr_restore(intr_flag);
+}
+
+void
+cpu_idle(void) {
+    while (1) {
+        if (current->need_resched) {
+            schedule();
+        }
+    }
+}
