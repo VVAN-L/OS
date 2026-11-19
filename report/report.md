@@ -6,7 +6,7 @@
 | ------------ | ---------------------------------------------- |
 | **实验名称** | Lab 4: 进程管理                                |
 | **小组成员** | 2411858-王钟岳、2412934-王海沛、2412143-林家熠 |
-| **完成日期** | 2026-11-DD                                     |
+| **完成日期** | 2026-11-19                                     |
 
 ### 小组分工
 
@@ -227,9 +227,14 @@ A：这样的写法是合理的，但在复杂系统下可能会产生问题。�
 - 测试通过的结果（make grade），只有一个
 -->
 
+测试之前，补全了 lab2 和 lab3 的缺失代码，并将之前实验的 best_fit_pmm.c 和 best_fit_pmm.h 复制到当前实验里，将 pmm.c 中的 pmm_manager 设为定义的 best_fit_pmm_manager。同时在 memlayout.h 中补充了 page_init() 函数依赖的两个宏。
+
+在 code 目录下运行 make qemu 和 make grade，结果如下：
+
 **测试截图：**
 
-![测试结果截图](./images/test_result.png)
+![make qemu 测试结果截图](./images/make_qemu.png)
+![make grade 测试结果截图](./images/make_grade.png)
 
 ---
 
