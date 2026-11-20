@@ -172,10 +172,107 @@ page_remove 则应作为一个幂等删除接口存在，目标地址有映射�
 ---
 
 ### 功能模块：进程创建及初始化功能
+**负责人：** 2412143-林家熠
 
-参见实验报告模板
+#### 模块功能描述
+**需要实现/修改的函数：**
+
+```c
+struct proc_struct *proc_create(void (*func)(void), uintptr_t kstacktop);  // kern/process/proc.c
+void proc_init(void);                                                      // kern/process/proc.c
+static void forkret(void);                                                 // kern/process/proc.c
+```
+
+**功能说明：**
+
+该模块负责操作系统内核线程子系统的初始化与内核线程的创建。
+
+`proc_init` 在系统内核启动后期被调用，完成进程管理子系统初始化：初始化全局进程链表`proc_list`，创建系统空闲线程`idleproc`，之后创建第一个业务内核线程`initproc`。`idleproc`作为兜底线程，当系统没有可运行线程时被调度执行。
+
+`proc_create`是内核线程创建核心接口：分配并初始化`proc_struct`进程控制块，分配一页内核栈，手工构造线程执行上下文`struct context`。线程不能直接把返回地址设置为业务入口函数，需要设置`context.ra = forkret`，线程第一次获得 CPU 时会先进入`forkret`跳板函数。同时将新线程状态置为`PROC_RUNNABLE`，加入全局进程链表。如果中间任意一步内存分配失败，需要释放已经申请的资源，防止内存泄漏。
+
+`forkret`是新线程首次运行的跳板函数，配合框架提供的`forkrets`、`__trapret`中断返回链路，完成从初始上下文跳转到用户传入的线程入口函数。
+
+整个模块维护 PCB 的 pid、state、kstack、context、pgdir 等字段；全局进程链表为调度模块提供全部线程遍历能力。
+
+#### 最终提示词
+
+以下是经过迭代优化后，最终成功实现该功能的提示词：
+
+```markdown
+[PROMPT]
+修改文件 kern/process/proc.c，实现进程创建及初始化功能。补全 alloc_proc, proc_init, kernel_thread, do_fork, copy_thread, copy_mm 六个函数，成功创建 idleproc 和 initproc 两个内核线程。
+
+[RELY]
+1. 数据结构：struct proc_struct, struct context, struct trapframe, list_entry_t。
+2. 全局变量：proc_list, hash_list, idleproc, initproc, current, nr_process, boot_pgdir_pa。
+3. 已有接口：kmalloc, memset, list_init, read_csr(sstatus), local_intr_save/restore, setup_kstack, get_pid, hash_proc。
+4. 汇编符号：bootstack, kernel_thread_entry, forkret。
+
+[GUARANTEE]
+必须实现或修改的接口：
+- static struct proc_struct *alloc_proc(void);
+- void proc_init(void);
+- int kernel_thread(int (*fn)(void *), void *arg, uint32_t clone_flags);
+- int do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf);
+- static void copy_thread(struct proc_struct *proc, uintptr_t esp, struct trapframe *tf);
+- static int copy_mm(uint32_t clone_flags, struct proc_struct *proc);
+严禁修改函数签名，严禁破坏原有的全局变量定义。
+
+[SPECIFICATION]
+**Pre-Condition**: 物理内存管理和中断系统已初始化完毕，可以调用 kmalloc 和分配物理页。
+**Post-Condition**:
+1. alloc_proc: 分配 PCB，初始化状态为 PROC_UNINIT，pid=-1，pgdir=boot_pgdir_pa，初始化链表节点，将 context 和 name 清零。
+2. proc_init: 初始化 proc_list 和 hash_list；创建 idleproc 并设为 PROC_RUNNABLE，pid=0，kstack=bootstack，need_resched=1，current=idleproc；通过 kernel_thread 创建 initproc，加入链表并设为 RUNNABLE。
+3. kernel_thread: 构造临时 trapframe，设置 s0=fn, s1=arg；读取 sstatus，清除 SIE 位，设置 SPP 和 SPIE 位；epc 指向 kernel_thread_entry；调用 do_fork。
+4. do_fork: 依次调用 alloc_proc, setup_kstack, copy_mm, copy_thread；使用 local_intr_save 保护临界区，分配 pid，加入全局链表和哈希表，设为 PROC_RUNNABLE。注意处理分配失败时的回滚清理。
+5. copy_thread: 在内核栈顶分配 tf 空间并复制 tf，设置 a0=0 (子进程返回值)，若 esp 为 0 则 sp 指向 tf；设置 context.ra=forkret，context.sp=tf。
+6. copy_mm: 当前为空实现，直接返回 0。
+
+**Requirements**:
+
+注意 PCB 生命周期状态与资源挂接的顺序，防止内存泄漏。
+```
+
+##### 第一次迭代
+
+**遇到的问题：**
+
+- 问题 1：初始化上下文时直接将`context.ra`赋值为业务函数`func`，跳过`forkret`跳板，线程第一次切换后无法正常执行，触发异常。
+- 问题 2：`proc_create`分配 PCB、内核栈过程中，如果某一步分配失败，没有回滚释放已经申请的内存页，造成内存泄漏。
+- 问题 3：修改全局进程链表`proc_list`时没有使用临界区保护，单核环境下中断到来会破坏链表结构。
+
+**问题解决策略：**
+
+- 针对问题 1：严格遵循框架执行链路，`ra`固定赋值为`forkret`，由跳板函数完成到业务入口的跳转。
+- 针对问题 2：增加错误分支，按照分配逆序释放已经分配成功的页资源，失败直接返回 NULL。
+- 针对问题 3：对全局链表增加`local_intr_save` / `local_intr_restore`临界区保护。
+
+**最终结果：**
+
+修正了上下文 ra 赋值、内存资源回滚、链表临界区三个问题，本次迭代后不再改动 get_pte 函数，保证不侵入内存管理模块原有代码
 
 ---
+
+##### 第二次迭代
+
+**最终结果：**
+
+经过 2 次迭代，该模块最终：
+
+- ✅ 编译通过
+- ✅ 所有相关测试通过
+- ✅ 功能符合预期
+
+**关键改进点总结：**
+
+1. 理解框架的跳板执行机制，新线程首次运行必须走`forkret → forkrets → __trapret`链路，不可直接跳转业务函数。
+2. 内存分配遵循 “分配‑判断‑失败回滚” 模式，消除内存泄漏。
+3. 共享全局链表访问使用关中断实现单核临界区。
+4. 严格保证创建顺序，必须先生成`idleproc`，再生成`initproc`。
+
+---
+
 
 ### 功能模块：进程调度
 **负责人：** 2412934-王海沛
