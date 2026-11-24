@@ -98,6 +98,15 @@ extern struct mm_struct *check_mm_struct;
 //lab3 请补充你在lab3中的代码
 
 //lab5 function1 YOUR CODE update exception_handler
+void exception_handler(struct trapframe *tf)
+{
+    if (tf->cause == CAUSE_USER_ECALL) {
+        tf->epc += 4;
+        syscall();
+        return;
+    }
+    print_trapframe(tf);
+}
 
 
 static inline void trap_dispatch(struct trapframe *tf)
